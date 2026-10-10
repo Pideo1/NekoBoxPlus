@@ -8,7 +8,8 @@
 Компилируемые исходники остаются в папке `workspace`.  
 Кроме того добавлены:  
 - этот файл (`README.md`),  
-- папки `scripts` и `.github` со скриптами для автоматической сборки на Гитхабе.  
+- папки `scripts` и `.github` со скриптами для автоматической сборки на Гитхабе,
+- папку `patches-override/` с локальными патчами, которые применяются поверх `workspace/` на каждом сборке (см. ниже).
 
 Если Вам нужно модифицировать NekoBox+ и собрать его при помощи Гитхаб, то Вы можете сделать форк этого репозитория или просто использовать скрипты из него.  
 
@@ -21,7 +22,11 @@
 
 `scripts/prepare-workspace.sh` — универсальный движок: читает `Base:/Target patch commit:` в каждом  `patches/*.patch`, клонирует репозиторий на этот коммит (без полного клона — GitHub отдаёт произвольный SHA напрямую), кладёт в `workspace/<name>`, применяет патч. После `sing-box.patch/NekoBoxForAndroid.patch` дополнительно сканирует появившиеся `*/patches/*/README(.md)` (сейчас там `amneziawg-go`, `utls`, `byedpi`) и так же тянет+патчит их. Версия нигде не хардкожена.
 
-`scripts/build-and-package.sh` — гоняет `buildScript/lib/core.docker.sh` (это обязательно докер: патч тянет за собой пропатченный Go-рантайм) и `./gradlew app:assemblePlusRelease`. Флейвор "plus", который добавляет этот же патч, уже сам называет вывод `NekoBoxPlus-<version>-<abi>.apk` — переименовывать самому не нужно.  
+`scripts/build-and-package.sh` — гоняет `buildScript/lib/core.docker.sh` (это обязательно докер: патч тянет за собой пропатченный Go-рантайм) и `./gradlew app:assemblePlusRelease`. Флейвор "plus", который добавляет этот же патч, уже сам называет вывод `NekoBoxPlus-<version>-<abi>.apk` — переименовывать самому не нужно. Перед запуском ядра скрипт применяет все `.patch` из папки `patches-override/` (см. ниже).
+
+`patches-override/*.patch` — локальные патчи, которые применяются к `workspace/` в начале `build-and-package.sh`, до запуска сборки ядра. В отличие от `patches.tar.gz` (который удаляется `ingest.yml` сразу после подготовки workspace), эти патчи живут в git навсегда и переживают любой повторный ingest. Формат — обычный `git diff` относительно корня репозитория (пути вида `workspace/sing-box/...`); генерируются как `git diff workspace/sing-box/foo > patches-override/0001-foo.patch` и коммитятся как обычные файлы — `ingest.yml` их не трогает.
+
+Текущий патч `0001-grpc-user-agent.patch` подменяет дефолтный `grpc-go/x.y.z` в `User-Agent` gRPC-клиента `transport/v2raygrpc/client.go` браузерным UA — помогает против DPI-систем, которые распознают gRPC по этому заголовку.
 
 Далее информация с упомянутой темы на `4pda.to`.
 

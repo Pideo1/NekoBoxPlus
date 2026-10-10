@@ -1,0 +1,12 @@
+diff --git a/workspace/sing-box/transport/v2raygrpc/client.go b/workspace/sing-box/transport/v2raygrpc/client.go
+index 0c3340ac..3f923e5a 100644
+--- a/workspace/sing-box/transport/v2raygrpc/client.go
++++ b/workspace/sing-box/transport/v2raygrpc/client.go
+@@ -67,6 +67,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
+ 	}))
+ 	//nolint:staticcheck
+ 	dialOptions = append(dialOptions, grpc.WithReturnConnectionError())
++	dialOptions = append(dialOptions, grpc.WithUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"))
+ 	return &Client{
+ 		ctx:         ctx,
+ 		dialer:      dialer,

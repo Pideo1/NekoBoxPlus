@@ -13,6 +13,24 @@
 set -euo pipefail
 
 ROOT="$(pwd)"
+
+# --- apply local override patches (survives prepare-workspace.sh reset) --
+# Any *.patch under patches-override/ is applied against the repo root, so a
+# patch generated as `git diff workspace/sing-box/...` just works. These
+# patches live in git (unlike patches.tar.gz which ingest.yml discards after
+# materialising workspace/), so they let us carry local tweaks that the
+# upstream 4pda patch set doesn't ship -- for instance swapping grpc-go's
+# default "grpc-go/x.y.z" user-agent for a browser-like one.
+OVERRIDE_DIR="$ROOT/patches-override"
+if [ -d "$OVERRIDE_DIR" ]; then
+  shopt -s nullglob
+  for p in "$OVERRIDE_DIR"/*.patch; do
+    echo "applying override: $(basename "$p")"
+    git -C "$ROOT" apply --whitespace=nowarn --verbose "$p"
+  done
+  shopt -u nullglob
+fi
+
 NBA="$ROOT/workspace/NekoBoxForAndroid"
 cd "$NBA"
 
