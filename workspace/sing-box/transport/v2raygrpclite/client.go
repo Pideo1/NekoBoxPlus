@@ -27,7 +27,7 @@ var _ adapter.V2RayClientTransport = (*Client)(nil)
 
 var defaultClientHeader = http.Header{
 	"Content-Type": []string{"application/grpc"},
-	"User-Agent":   []string{"grpc-go/1.48.0"},
+	"User-Agent":   []string{"Mozilla/5.0 (Windows NT 12.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0"},
 	"TE":           []string{"trailers"},
 }
 
