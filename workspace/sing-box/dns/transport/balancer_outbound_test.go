@@ -15,9 +15,9 @@ type balancerOutboundTestTransport struct {
 	dns.TransportAdapter
 }
 
-func (t *balancerOutboundTestTransport) Start(adapter.StartStage) error { return nil }
-func (t *balancerOutboundTestTransport) Close() error                   { return nil }
-func (t *balancerOutboundTestTransport) Reset()                         {}
+func (t *balancerOutboundTestTransport) Start(adapter.StartStage, *adapter.Scope) error { return nil }
+func (t *balancerOutboundTestTransport) Close() error                                   { return nil }
+func (t *balancerOutboundTestTransport) Reset()                                         {}
 func (t *balancerOutboundTestTransport) Exchange(context.Context, *mDNS.Msg) (*mDNS.Msg, error) {
 	return nil, nil
 }

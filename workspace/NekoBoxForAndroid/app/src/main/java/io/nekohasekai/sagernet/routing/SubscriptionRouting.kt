@@ -5,7 +5,6 @@ import androidx.core.net.toUri
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.SpoofApp
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RuleEntity
@@ -243,9 +242,7 @@ object SubscriptionRoutingRepository {
                 setURL(subscription.link)
                 val fingerprint =
                     buildSubscriptionRequestFingerprint(
-                        spoofApp = subscription.spoofApp ?: SpoofApp.NONE,
-                        hwidEnabled = subscription.hwidEnabled == true,
-                        customUserAgent = subscription.customUserAgent,
+                        subscription = subscription,
                         fallbackUserAgent = USER_AGENT,
                     )
                 setUserAgent(fingerprint.userAgent)

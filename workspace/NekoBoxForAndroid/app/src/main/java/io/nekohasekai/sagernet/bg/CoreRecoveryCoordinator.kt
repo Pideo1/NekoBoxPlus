@@ -58,6 +58,7 @@ internal object CoreRecoveryCoordinator {
 
     private fun serviceClassForMode(serviceMode: String) = when (serviceMode) {
         Key.MODE_VPN -> VpnService::class.java
+        Key.MODE_TPROXY -> TProxyService::class.java
         Key.MODE_PROXY -> ProxyService::class.java
         else -> null
     }

@@ -7,14 +7,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.*
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import io.nekohasekai.sagernet.Action
 import io.nekohasekai.sagernet.AppLogLevel
 import io.nekohasekai.sagernet.AppLogLevelController
 import io.nekohasekai.sagernet.Key
+import io.nekohasekai.sagernet.LocalNetworkPermission
 import io.nekohasekai.sagernet.Param
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
@@ -29,6 +32,10 @@ import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.plugin.PluginManager
 import io.nekohasekai.sagernet.utils.DefaultNetworkListener
+import io.nekohasekai.sagernet.utils.NetworkInterfacesPolicy
+import io.nekohasekai.sagernet.utils.NetworkSharingPolicy
+import io.nekohasekai.sagernet.utils.NetworkSharingPreferences
+import moe.matsuri.nb4a.proxy.config.ConfigBean
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -196,6 +203,39 @@ class BaseService {
 
         override fun getState(): Int = (data?.state ?: State.Idle).ordinal
         override fun getProfileName(): String = data?.proxy?.displayProfileName ?: "Idle"
+
+        override fun activeProxyListeners(): String {
+            val current = data ?: return "[]"
+            if (current.state != State.Connected) return "[]"
+            val proxy = current.proxy?.takeIf { it.isInitialized() } ?: return "[]"
+            val listeners = runCatching {
+                NetworkInterfacesPolicy.listenersFromConfig(proxy.config.config)
+            }.getOrDefault(emptyList())
+            // A stop or replacement may have started while the configuration was being read.
+            if (current.state != State.Connected || current.proxy !== proxy) return "[]"
+            return NetworkInterfacesPolicy.listenersJson(listeners)
+        }
+
+        override fun isNetworkSharingConfigurable(): Boolean {
+            val proxy = data?.proxy ?: return false
+            return (proxy.profile.requireBean() as? ConfigBean)?.type != 0
+        }
+
+        override fun isTProxyTetheringActive(): Boolean =
+            data?.state == State.Connected && TProxyManager.activeTethering == true
+
+        override fun setNetworkSharingEnabled(enabled: Boolean): Boolean = runBlocking(Dispatchers.Main.immediate) {
+            val current = data ?: return@runBlocking false
+            if (current.state != State.Connected || !isNetworkSharingConfigurable()) return@runBlocking false
+            val context = SagerNet.application
+            val granted = ContextCompat.checkSelfPermission(context, LocalNetworkPermission.NAME) == PackageManager.PERMISSION_GRANTED
+            if (NetworkSharingPolicy.permissionRequired(NetworkSharingPreferences.load().mode, enabled,
+                Build.VERSION.SDK_INT, granted)) return@runBlocking false
+            NetworkSharingPreferences.save(enabled)
+            // Rebuild listeners even when a selector-only reload would otherwise be possible.
+            current.restartService()
+            true
+        }
 
         override fun registerCallback(cb: ISagerNetServiceCallback, id: Int) {
             if (id == SagerConnection.CONNECTION_ID_RESTART_BG) {
@@ -654,6 +694,7 @@ class BaseService {
         }
 
         fun canReloadSelector(selectedProxy: Long = DataStore.selectedProxy): Boolean {
+            if (this is TProxyService) return false // Capture options require transactional replacement.
             if ((data.proxy?.config?.selectorGroupId ?: -1L) < 0) return false
             val ent = AppData.profiles.getById(selectedProxy) ?: return false
             val tmpBox = ProxyInstance(ent)
@@ -663,6 +704,10 @@ class BaseService {
             }
             return false
         }
+
+        suspend fun prepareService() = Unit
+
+        fun beforeCoreCleanup() = Unit
 
         suspend fun startProcesses() {
             data.proxy!!.launch()
@@ -742,6 +787,7 @@ class BaseService {
             }
             val serviceMode = when (this) {
                 is VpnService -> Key.MODE_VPN
+                is TProxyService -> Key.MODE_TPROXY
                 is ProxyService -> Key.MODE_PROXY
                 else -> {
                     Logs.w("Skip background process recovery for unsupported service: $reason")
@@ -824,11 +870,16 @@ class BaseService {
             SagerNet.application.nativeInterface.setWifiRuleMonitoringEnabled(false)
             var closeError: Throwable? = null
             try {
+                beforeCoreCleanup()
+            } catch (e: Throwable) {
+                closeError = e
+            }
+            try {
                 data.proxy?.let { proxy ->
                     closeProxyInstance(proxy)
                 }
             } catch (e: Throwable) {
-                closeError = e
+                closeError?.addSuppressed(e) ?: run { closeError = e }
             } finally {
                 releaseServiceResources()
             }
@@ -1039,6 +1090,7 @@ class BaseService {
             val context = this as Context
             val serviceMode = when (this) {
                 is VpnService -> Key.MODE_VPN
+                is TProxyService -> Key.MODE_TPROXY
                 is ProxyService -> Key.MODE_PROXY
                 else -> return
             }
@@ -1253,6 +1305,7 @@ class BaseService {
             data.proxy = proxy
             data.connectionRecovery?.close()
             data.connectionRecovery = ConnectionRecoveryQueue(
+                disableCoreSleep = DataStore.disableCoreSleep,
                 urlTestRunning = { data.urlTestTracker.isRunning },
                 pause = { idle ->
                     if (data.proxy === proxy && data.state.started) {
@@ -1327,6 +1380,8 @@ class BaseService {
                         val hasActiveWifiRules = hasActiveWifiRules()
                         SagerNet.application.nativeInterface.setWifiRuleMonitoringEnabled(hasActiveWifiRules)
                         SagerNet.application.nativeInterface.unregisterWifiStateListener()
+                        TProxyManager.reconcile(this@Interface as Context)
+                        prepareService()
                         preInit()
                         proxy.init()
                         currentCoroutineContext().ensureActive()

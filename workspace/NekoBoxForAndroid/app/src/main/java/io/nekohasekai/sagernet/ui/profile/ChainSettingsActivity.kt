@@ -62,7 +62,7 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>() {
         runOnDefaultDispatcher {
             val ids = DataStore.serverProtocol.split(",").mapNotNull {
                 it.takeIf(String::isNotBlank)?.toLongOrNull()
-            }
+            }.distinct()
             val profiles = ProfileManager.getProfiles(ids).associateBy { it.id }
             onMainDispatcher {
                 proxyList.clear()
@@ -136,19 +136,18 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>() {
                     }
                     return@runOnDefaultDispatcher
                 }
-                val next = proxyList.toMutableList().apply {
-                    if (replacing in indices) this[replacing] = profile else add(profile)
-                }
-                if (!isValidByeDPIChain(next)) {
-                    onMainDispatcher {
+                onMainDispatcher {
+                    if (proxyList.any { it.id == profile.id }) return@onMainDispatcher
+                    val next = proxyList.toMutableList().apply {
+                        if (replacing in indices) this[replacing] = profile else add(profile)
+                    }
+                    if (!isValidByeDPIChain(next)) {
                         showComposeMessageDialog(
                             title = getText(R.string.invalid_profile),
                             message = getText(R.string.byedpi_chain_position_error),
                         )
+                        return@onMainDispatcher
                     }
-                    return@runOnDefaultDispatcher
-                }
-                onMainDispatcher {
                     if (replacing in proxyList.indices) proxyList[replacing] = profile
                     else proxyList.add(profile)
                     DataStore.dirty = true

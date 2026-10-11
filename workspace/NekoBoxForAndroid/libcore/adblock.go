@@ -601,13 +601,14 @@ func withAdblockService(databasePath string, cb func(svc adapter.AdblockService)
 	if err != nil {
 		return err
 	}
-	if err = adblockService.Start(adapter.StartStateInitialize); err != nil {
+	scope := adapter.NewScope(ctx, boxLog.NewNOPFactory().Logger())
+	defer scope.Close()
+	if err = adblockService.Start(adapter.StartStateInitialize, scope); err != nil {
 		return err
 	}
-	if err = adblockService.Start(adapter.StartStateStart); err != nil {
+	if err = adblockService.Start(adapter.StartStateStart, scope); err != nil {
 		return err
 	}
-	defer adblockService.Close()
 	return cb(adblockService)
 }
 

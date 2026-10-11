@@ -3343,6 +3343,10 @@ public class SingBoxOptions {
 
         public String network;
 
+        public String udp_mapping;
+        public String udp_filtering;
+        public Long udp_nat_max;
+
     }
 
     public static class Inbound_DirectOptions extends Inbound {

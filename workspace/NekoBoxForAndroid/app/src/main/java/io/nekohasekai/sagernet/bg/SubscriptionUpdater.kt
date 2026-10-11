@@ -4,36 +4,37 @@ import android.content.Context
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy.UPDATE
-import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkerParameters
-import androidx.work.multiprocess.RemoteWorkManager
 import io.nekohasekai.sagernet.BootReceiver
+import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.AppData
+import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
+import io.nekohasekai.sagernet.ktx.onIoDispatcher
 import io.nekohasekai.sagernet.ktx.preferSmallIcon
 import io.nekohasekai.sagernet.routing.SubscriptionRoutingIntervals
 import io.nekohasekai.sagernet.routing.SubscriptionRoutingRepository
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 object SubscriptionUpdater {
 
-    private const val WORK_NAME = "SubscriptionUpdater"
+    suspend fun cleanupOrphanedWork() {
+        cleanupSubscriptionWork(RemoteSubscriptionWorkScheduler) {
+            AppData.groups.subscriptions().any { it.needsAutomaticSubscriptionUpdates() }
+        }
+    }
 
     suspend fun reconfigureUpdater() {
         val subscriptions = AppData.groups.subscriptions()
-            .filter {
-                val subscription = it.subscription!!
-                subscription.autoUpdate ||
-                    (subscription.routingEnabled && subscription.autoRoutingUrl.isNotBlank())
-            }
+            .filter { it.needsAutomaticSubscriptionUpdates() }
         syncBootReceiverEnabled(subscriptions.isNotEmpty())
         if (subscriptions.isEmpty()) {
-            RemoteWorkManager.getInstance(app).cancelUniqueWork(WORK_NAME)
+            RemoteSubscriptionWorkScheduler.cancelCanonicalWork()
             return
         }
 
@@ -63,18 +64,7 @@ object SubscriptionUpdater {
             nowSeconds = System.currentTimeMillis() / 1000L,
         ) ?: return
 
-        // main process
-        RemoteWorkManager.getInstance(app).enqueueUniquePeriodicWork(
-            WORK_NAME,
-            UPDATE,
-            PeriodicWorkRequest.Builder(UpdateTask::class.java, schedule.intervalMinutes, TimeUnit.MINUTES)
-                .apply {
-                    if (schedule.initialDelaySeconds > 0) {
-                        setInitialDelay(schedule.initialDelaySeconds, TimeUnit.SECONDS)
-                    }
-                }
-                .build()
-        )
+        RemoteSubscriptionWorkScheduler.schedule(schedule)
         Logs.d(
             "reconfigureUpdater, interval: ${schedule.intervalMinutes} min" +
                     if (schedule.initialDelaySeconds > 0) ", initial delay: ${schedule.initialDelaySeconds} s" else ""
@@ -84,11 +74,7 @@ object SubscriptionUpdater {
     suspend fun syncBootReceiverEnabled() {
         syncBootReceiverEnabled(
             AppData.groups.subscriptions()
-                .any {
-                    val subscription = it.subscription!!
-                    subscription.autoUpdate ||
-                        (subscription.routingEnabled && subscription.autoRoutingUrl.isNotBlank())
-                }
+                .any { it.needsAutomaticSubscriptionUpdates() }
         )
     }
 
@@ -114,10 +100,20 @@ object SubscriptionUpdater {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
         override suspend fun doWork(): Result {
-            val subscriptions = AppData.groups.subscriptions()
+            try {
+                updateSubscriptions()
+                return Result.success()
+            } finally {
+                nm.cancel(2)
+            }
+        }
 
-            if (subscriptions.isNotEmpty()) for (profile in subscriptions) {
-                val subscription = profile.subscription!!
+        private suspend fun updateSubscriptions() {
+            for (candidate in AppData.groups.subscriptions()) {
+                currentCoroutineContext().ensureActive()
+                val profile = onIoDispatcher { AppData.groups.getById(candidate.id) } ?: continue
+                if (profile.type != GroupType.SUBSCRIPTION) continue
+                val subscription = profile.subscription ?: continue
 
                 val now = System.currentTimeMillis() / 1000L
                 val subscriptionDue =
@@ -136,23 +132,41 @@ object SubscriptionUpdater {
                     GroupUpdater.executeUpdate(profile, false)
                 }
 
+                currentCoroutineContext().ensureActive()
+                val routingProfile = onIoDispatcher { AppData.groups.getById(candidate.id) } ?: continue
+                if (routingProfile.type != GroupType.SUBSCRIPTION) continue
+                val routingSubscription = routingProfile.subscription ?: continue
                 val routingDue =
-                    subscription.routingEnabled &&
-                        subscription.autoRoutingUrl.isNotBlank() &&
-                        now - subscription.routingLastUpdated >=
-                        SubscriptionRoutingIntervals.normalize(subscription.routingUpdateInterval)
+                    routingSubscription.routingEnabled &&
+                        routingSubscription.autoRoutingUrl.isNotBlank() &&
+                        now - routingSubscription.routingLastUpdated >=
+                        SubscriptionRoutingIntervals.normalize(routingSubscription.routingUpdateInterval)
                 if (routingDue) {
-                    runCatching {
-                        if (SubscriptionRoutingRepository.refreshAutoRouting(profile)) {
-                            AppData.groups.updateGroup(profile)
+                    try {
+                        if (SubscriptionRoutingRepository.refreshAutoRouting(routingProfile)) {
+                            currentCoroutineContext().ensureActive()
+                            onIoDispatcher {
+                                val current = AppData.groups.getById(routingProfile.id)
+                                val currentSubscription = current?.subscription
+                                if (current?.type == GroupType.SUBSCRIPTION &&
+                                    currentSubscription != null && currentSubscription.routingEnabled &&
+                                    currentSubscription.autoRoutingUrl == routingSubscription.autoRoutingUrl
+                                ) {
+                                    currentSubscription.routingPayload = routingSubscription.routingPayload
+                                    currentSubscription.routingFormat = routingSubscription.routingFormat
+                                    currentSubscription.routingLastUpdated = routingSubscription.routingLastUpdated
+                                    currentSubscription.routingOff = routingSubscription.routingOff
+                                    AppData.groups.updateGroup(current)
+                                }
+                            }
                         }
-                    }.onFailure(Logs::w)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        Logs.w(error)
+                    }
                 }
             }
-
-            nm.cancel(2)
-
-            return Result.success()
         }
     }
 

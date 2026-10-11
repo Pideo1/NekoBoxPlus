@@ -29,6 +29,7 @@ class NetworkFragment : NamedFragment() {
                     onSpeedTest = { open(SpeedTestActivity::class.java) },
                     onRuleSetMatch = { open(RuleSetMatchActivity::class.java) },
                     onCellularNetwork = { open(CellularNetworkActivity::class.java) },
+                    onNetworkInterfaces = { open(NetworkInterfacesActivity::class.java) },
                 )
             }
         }

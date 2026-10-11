@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.group
 
 import androidx.core.net.toUri
-import io.nekohasekai.sagernet.SpoofApp
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SubscriptionBean
 import io.nekohasekai.sagernet.ktx.USER_AGENT
@@ -100,9 +99,7 @@ internal object DefaultSubscriptionReader : SubscriptionReader {
                 if (DataStore.allowInsecureOnRequest) allowInsecure()
                 setURL(link)
                 val fingerprint = buildSubscriptionRequestFingerprint(
-                    spoofApp = subscription.spoofApp ?: SpoofApp.NONE,
-                    hwidEnabled = subscription.hwidEnabled == true,
-                    customUserAgent = subscription.customUserAgent,
+                    subscription = subscription,
                     fallbackUserAgent = USER_AGENT,
                 )
                 setUserAgent(fingerprint.userAgent)

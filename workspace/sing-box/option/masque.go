@@ -58,10 +58,10 @@ type CloudflareProfile struct {
 
 type MASQUEConfig struct {
 	PrivateKey     string `json:"private_key"`      // Base64-encoded ECDSA private key
-	EndpointV4     string `json:"endpoint_v4"`      // IPv4 address of the endpoint
-	EndpointV6     string `json:"endpoint_v6"`      // IPv6 address of the endpoint
-	EndpointH2V4   string `json:"endpoint_h2_v4"`   // IPv4 address used in HTTP/2 mode
-	EndpointH2V6   string `json:"endpoint_h2_v6"`   // IPv6 address used in HTTP/2 mode
+	EndpointV4     string `json:"endpoint_v4"`      // IPv4 address or hostname of the endpoint
+	EndpointV6     string `json:"endpoint_v6"`      // IPv6 address or hostname of the endpoint
+	EndpointH2V4   string `json:"endpoint_h2_v4"`   // IPv4 address or hostname used in HTTP/2 mode
+	EndpointH2V6   string `json:"endpoint_h2_v6"`   // IPv6 address or hostname used in HTTP/2 mode
 	EndpointPubKey string `json:"endpoint_pub_key"` // PEM-encoded ECDSA public key of the endpoint to verify against
 	License        string `json:"license"`          // Application license key
 	ID             string `json:"id"`               // Device unique identifier
@@ -101,7 +101,7 @@ func (c *MASQUEConfig) GetEcEndpointPublicKey() (*ecdsa.PublicKey, error) {
 	return ecPubKey, nil
 }
 
-func (c *MASQUEConfig) SelectEndpointFromConfig(useHTTP2 bool, useIPv6 bool, port int) (net.Addr, error) {
+func (c *MASQUEConfig) EndpointHost(useHTTP2 bool, useIPv6 bool) string {
 	v4 := c.EndpointV4
 	v6 := c.EndpointV6
 	if useHTTP2 {
@@ -113,18 +113,20 @@ func (c *MASQUEConfig) SelectEndpointFromConfig(useHTTP2 bool, useIPv6 bool, por
 		}
 	}
 	if useIPv6 {
-		ip := net.ParseIP(v6)
-		if ip == nil {
-			return nil, fmt.Errorf("invalid endpoint_v6 value %q", v6)
-		}
-		if useHTTP2 {
-			return &net.TCPAddr{IP: ip, Port: port}, nil
-		}
-		return &net.UDPAddr{IP: ip, Port: port}, nil
+		return v6
 	}
-	ip := net.ParseIP(v4)
+	return v4
+}
+
+func (c *MASQUEConfig) SelectEndpointFromConfig(useHTTP2 bool, useIPv6 bool, port int) (net.Addr, error) {
+	host := c.EndpointHost(useHTTP2, useIPv6)
+	ip := net.ParseIP(host)
 	if ip == nil {
-		return nil, fmt.Errorf("invalid endpoint_v4 value %q", v4)
+		field := "endpoint_v4"
+		if useIPv6 {
+			field = "endpoint_v6"
+		}
+		return nil, fmt.Errorf("invalid %s value %q", field, host)
 	}
 	if useHTTP2 {
 		return &net.TCPAddr{IP: ip, Port: port}, nil

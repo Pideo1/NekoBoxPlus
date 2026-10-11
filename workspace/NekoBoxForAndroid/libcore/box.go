@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"libcore/dashboard"
 	"libcore/device"
 	"log"
 	"os"
@@ -99,6 +100,7 @@ type BoxInstance struct {
 	forTest      bool
 	localDNS     LocalDNSTransport
 	urlTestReady urlTestReadinessState
+	dashboard    *dashboard.Host
 }
 
 const (
@@ -203,6 +205,9 @@ func newSingBoxInstanceWithRoutingPathsContext(
 		nekoboxAndroidCertificateProviderRegistry(),
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
+	if client := currentTProxyClient(); client != nil {
+		service.MustRegister[adapter.TProxySocketFactory](ctx, &tproxySocketFactory{client: *client})
+	}
 	ctx = filemanager.WithDefault(ctx, workingPath, tempPath, os.Getuid(), os.Getgid())
 	service.MustRegister[adapter.PlatformInterface](ctx, &boxPlatformInterfaceWrapper{
 		forTest:       forTest,
@@ -457,6 +462,8 @@ func (b *BoxInstance) CloseTimeout(timeoutMillis int64) (err error) {
 	b.closeDone = done
 	boxInstance := b.Box
 	cancel := b.cancel
+	dashboardHost := b.dashboard
+	b.dashboard = nil
 	b.access.Unlock()
 
 	go func() {
@@ -483,6 +490,9 @@ func (b *BoxInstance) CloseTimeout(timeoutMillis int64) (err error) {
 		}()
 		if cancel != nil {
 			cancel()
+		}
+		if dashboardHost != nil {
+			dashboardHost.Close()
 		}
 		if boxInstance != nil {
 			closeErr = boxInstance.Close()

@@ -49,10 +49,12 @@ internal class GlobalSettingsController(
     fun isVisible(key: String): Boolean = when (key) {
         "configureCustomTheme" -> DataStore.appTheme == Theme.CUSTOM && CustomTheme.isSupported
         Key.CONFIGURE_TOOLBAR_LAYOUT -> DataStore.useToolbar
-        Key.METERED_NETWORK -> Build.VERSION.SDK_INT >= 28
+        Key.TPROXY_TETHERING -> DataStore.serviceMode == Key.MODE_TPROXY
+        Key.TUN_IMPLEMENTATION, Key.MTU, Key.APPEND_HTTP_PROXY, Key.HTTP_PROXY_BYPASS -> DataStore.serviceMode != Key.MODE_TPROXY
+        Key.METERED_NETWORK -> Build.VERSION.SDK_INT >= 28 && DataStore.serviceMode != Key.MODE_TPROXY
         Key.TUN_UNRECOGNIZED_TRAFFIC, Key.TUN_SYSTEM_DNS_TRAFFIC,
         Key.TUN_DNS_WHITELIST, Key.TUN_DOT_WHITELIST, Key.TUN_DOH_WHITELIST ->
-            DataStore.serviceMode == Key.MODE_VPN
+            DataStore.serviceMode != Key.MODE_PROXY
         Key.RULES_GEOSITE_URL, Key.RULES_GEOIP_URL ->
             DataStore.rulesProvider == DataStore.RULES_PROVIDER_CUSTOM
         Key.FRAGMENT_LENGTH, Key.FRAGMENT_INTERVAL ->
@@ -208,9 +210,11 @@ internal class GlobalSettingsController(
 
     private companion object {
         val RELOAD_KEYS = setOf(
+            Key.TPROXY_TETHERING,
             Key.SPEED_INTERVAL, Key.PROFILE_TRAFFIC_UPDATE_INTERVAL, Key.TUN_UNRECOGNIZED_TRAFFIC,
             Key.TUN_SYSTEM_DNS_TRAFFIC, Key.TUN_DNS_WHITELIST, Key.TUN_DOT_WHITELIST,
             Key.TUN_DOH_WHITELIST, Key.CONNECTION_GUARD, Key.OVERLOAD_WATCHDOG, Key.MEMORY_LIMIT,
+            Key.DISABLE_CORE_SLEEP,
             Key.ENABLE_CLASH_API, Key.HIDE_CLASH_API, Key.REQUIRE_PROXY_IN_VPN,
             Key.DISABLE_UDP_FOR_LOCAL_PROXY, Key.MIXED_LISTENER, Key.MIXED_PORT, Key.MIXED_USERNAME,
             Key.MIXED_PASSWORD, Key.APPEND_HTTP_PROXY, Key.STRICT_ROUTE, Key.SHOW_DIRECT_SPEED,

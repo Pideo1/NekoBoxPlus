@@ -24,6 +24,7 @@ class SagerConnection(
     companion object {
         val serviceClass
             get() = when (DataStore.serviceMode) {
+                Key.MODE_TPROXY -> TProxyService::class
                 Key.MODE_PROXY -> ProxyService::class
                 Key.MODE_VPN -> VpnService::class
                 else -> throw UnknownError()
@@ -35,6 +36,8 @@ class SagerConnection(
         const val CONNECTION_ID_MAIN_ACTIVITY_BACKGROUND = 3
         const val CONNECTION_ID_RESTART_BG = 4
         const val CONNECTION_ID_SPEED_TEST = 5
+        const val CONNECTION_ID_NETWORK_INTERFACES = 6
+        const val CONNECTION_ID_DASHBOARD = 7
 
         var restartingApp = false
     }

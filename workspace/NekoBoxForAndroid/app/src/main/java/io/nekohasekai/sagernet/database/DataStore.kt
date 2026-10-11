@@ -178,7 +178,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
 
     var appTLSVersion by configurationStore.string(Key.APP_TLS_VERSION)
     var appUTLSFingerprint by configurationStore.string(Key.APP_UTLS_FINGERPRINT)
-    var enableClashAPI by configurationStore.boolean(Key.ENABLE_CLASH_API) { true }
+    var enableClashAPI by configurationStore.boolean(Key.ENABLE_CLASH_API) { false }
     var hideClashApi by configurationStore.boolean(Key.HIDE_CLASH_API) { true }
     var clashApiSecret: String
         get() {
@@ -200,6 +200,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var networkChangeResetConnections by configurationStore.boolean(Key.NETWORK_CHANGE_RESET_CONNECTIONS) { true }
     var wakeReconnect by configurationStore.boolean(Key.WAKE_RECONNECT)
     var wakeResetConnections by configurationStore.boolean(Key.WAKE_RESET_CONNECTIONS) { true }
+    var disableCoreSleep by configurationStore.boolean(Key.DISABLE_CORE_SLEEP)
     var globalTcpFastOpen by configurationStore.boolean(Key.GLOBAL_TCP_FAST_OPEN)
     var globalTcpMultiPath by configurationStore.boolean(Key.GLOBAL_TCP_MULTI_PATH)
     var globalUdpFragment by configurationStore.string(Key.GLOBAL_UDP_FRAGMENT) { "" }
@@ -237,6 +238,8 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var automaticConnectionCheck by configurationStore.boolean(Key.AUTOMATIC_CONNECTION_CHECK) { true }
     var enableGroupUpdateDialog by configurationStore.boolean(Key.ENABLE_GROUP_UPDATE_DIALOG) { true }
     var openGroupSettingsOnLongPress by configurationStore.boolean(Key.OPEN_GROUP_SETTINGS_ON_LONG_PRESS) { true }
+    var tproxyTethering by configurationStore.boolean(Key.TPROXY_TETHERING)
+
     var serviceMode by configurationStore.string(Key.SERVICE_MODE) { Key.MODE_VPN }
     var udpNatMapping by configurationStore.string(Key.UDP_NAT_MAPPING) { "" }
     var udpNatFiltering by configurationStore.string(Key.UDP_NAT_FILTERING) { "" }
@@ -351,7 +354,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
         }
 
         if (configurationStore.getBoolean(Key.ENABLE_CLASH_API) == null) {
-            enableClashAPI = true
+            enableClashAPI = false
         }
 
         if (configurationStore.getBoolean(Key.HIDE_CLASH_API) == null) {
@@ -446,6 +449,9 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var stunTestPreset by configurationStore.string(Key.STUN_TEST_PRESET) { "balanced" }
     var stunTestCustomServers by configurationStore.string(Key.STUN_TEST_CUSTOM_SERVERS) { "" }
     var alwaysShowAddress by configurationStore.boolean(Key.ALWAYS_SHOW_ADDRESS)
+
+    val dashboardSocketPath: String
+        get() = File(SagerNet.application.filesDir, "dashboard/api.sock").absolutePath
 
     val clashApiSocketPath: String
         get() = File(SagerNet.application.cacheDir, CLASH_API_SOCKET_NAME).absolutePath
@@ -634,6 +640,10 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var subscriptionFilterRegex by profileCacheStore.string(Key.SUBSCRIPTION_FILTER_REGEX)
     var subscriptionHwidEnabled by profileCacheStore.boolean(Key.SUBSCRIPTION_HWID_ENABLED)
     var subscriptionSpoofApp by profileCacheStore.stringToInt(Key.SUBSCRIPTION_SPOOF_APP) { 0 }
+    var subscriptionHwid by profileCacheStore.string(Key.SUBSCRIPTION_HWID)
+    var subscriptionSpoofDevice by profileCacheStore.boolean(Key.SUBSCRIPTION_SPOOF_DEVICE)
+    var subscriptionDevicePreset by profileCacheStore.string(Key.SUBSCRIPTION_DEVICE_PRESET)
+    var subscriptionDeviceHeaders by profileCacheStore.string(Key.SUBSCRIPTION_DEVICE_HEADERS)
     var subscriptionServerDns by profileCacheStore.string(Key.SUBSCRIPTION_SERVER_DNS)
     var subscriptionBannerLayout by profileCacheStore.stringSet(Key.SUBSCRIPTION_BANNER_LAYOUT)
     var subscriptionRoutingEnabled by profileCacheStore.boolean(Key.SUBSCRIPTION_ROUTING_ENABLED)

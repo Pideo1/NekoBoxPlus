@@ -15,12 +15,12 @@ type peerResolverTestTransport struct {
 	outbound string
 }
 
-func (t *peerResolverTestTransport) Type() string                   { return "test" }
-func (t *peerResolverTestTransport) Tag() string                    { return t.tag }
-func (t *peerResolverTestTransport) Dependencies() []string         { return nil }
-func (t *peerResolverTestTransport) Start(adapter.StartStage) error { return nil }
-func (t *peerResolverTestTransport) Close() error                   { return nil }
-func (t *peerResolverTestTransport) Reset()                         {}
+func (t *peerResolverTestTransport) Type() string                                   { return "test" }
+func (t *peerResolverTestTransport) Tag() string                                    { return t.tag }
+func (t *peerResolverTestTransport) Dependencies() []string                         { return nil }
+func (t *peerResolverTestTransport) Start(adapter.StartStage, *adapter.Scope) error { return nil }
+func (t *peerResolverTestTransport) Close() error                                   { return nil }
+func (t *peerResolverTestTransport) Reset()                                         {}
 func (t *peerResolverTestTransport) Exchange(context.Context, *mDNS.Msg) (*mDNS.Msg, error) {
 	return nil, nil
 }
@@ -37,8 +37,8 @@ type peerResolverTestManager struct {
 	defaultDNS adapter.DNSTransport
 }
 
-func (m *peerResolverTestManager) Start(adapter.StartStage) error { return nil }
-func (m *peerResolverTestManager) Close() error                   { return nil }
+func (m *peerResolverTestManager) Start(adapter.StartStage, *adapter.Scope) error { return nil }
+func (m *peerResolverTestManager) Close() error                                   { return nil }
 func (m *peerResolverTestManager) Transports() []adapter.DNSTransport {
 	return m.transports
 }

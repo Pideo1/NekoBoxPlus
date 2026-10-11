@@ -27,6 +27,27 @@ func (l *Listener) ListenUDP() (net.PacketConn, error) {
 
 func (l *Listener) ListenUDPWithConfig(listenConfig net.ListenConfig) (net.PacketConn, error) {
 	bindAddr := M.SocksaddrFrom(l.listenOptions.Listen.Build(netip.AddrFrom4([4]byte{127, 0, 0, 1})), l.listenOptions.ListenPort)
+	if l.tproxy {
+		if factory := service.FromContext[adapter.TProxySocketFactory](l.ctx); factory != nil {
+			if l.listenOptions.NetNs != "" || l.listenOptions.BindInterface != "" || l.listenOptions.RoutingMark != 0 {
+				return nil, E.New("privileged TPROXY sockets do not support netns, bind_interface or routing_mark")
+			}
+			fd, err := factory.OpenTProxySocket(M.NetworkFromNetAddr(N.NetworkUDP, bindAddr.Addr), bindAddr.String(), false)
+			if err != nil {
+				return nil, err
+			}
+			file := os.NewFile(uintptr(fd), "tproxy-udp")
+			packetConn, err := net.FilePacketConn(file)
+			_ = file.Close()
+			if err != nil {
+				return nil, err
+			}
+			l.udpConn = packetConn.(*net.UDPConn)
+			l.udpAddr = bindAddr
+			l.logger.Info("udp server started at ", packetConn.LocalAddr())
+			return packetConn, nil
+		}
+	}
 	if l.listenOptions.BindInterface != "" {
 		listenConfig.Control = control.Append(listenConfig.Control, control.BindToInterface(service.FromContext[adapter.NetworkManager](l.ctx).InterfaceFinder(), l.listenOptions.BindInterface, -1))
 	}
@@ -42,7 +63,9 @@ func (l *Listener) ListenUDPWithConfig(listenConfig net.ListenConfig) (net.Packe
 	} else {
 		udpFragment = l.listenOptions.UDPFragmentDefault
 	}
-	if !udpFragment {
+	if udpFragment {
+		listenConfig.Control = control.Append(listenConfig.Control, control.EnableUDPFragment())
+	} else {
 		listenConfig.Control = control.Append(listenConfig.Control, control.DisableUDPFragment())
 	}
 	if l.tproxy {

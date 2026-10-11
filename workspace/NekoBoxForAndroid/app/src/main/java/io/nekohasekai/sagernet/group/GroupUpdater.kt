@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.group
 
 import io.nekohasekai.sagernet.*
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.AppData
 import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SubscriptionBean
@@ -138,44 +139,42 @@ abstract class GroupUpdater {
 
         suspend fun executeUpdate(proxyGroup: ProxyGroup, byUser: Boolean): Boolean {
             return coroutineScope {
+                val expectedLink = proxyGroup.subscription?.link ?: return@coroutineScope false
+                val guard = SubscriptionUpdateGuard(proxyGroup.id, expectedLink, byUser) { groupId ->
+                    onIoDispatcher { AppData.groups.getById(groupId) }
+                }
+                val currentGroup = guard.currentGroup() ?: return@coroutineScope false
                 if (!updating.add(proxyGroup.id)) return@coroutineScope false
                 val updateJob = coroutineContext.job
                 activeJobs[proxyGroup.id] = updateJob
-                GroupManager.postReload(proxyGroup.id)
-
-                val subscription = proxyGroup.subscription!!
-                val connected = DataStore.serviceState.connected
-                val userInterface = GroupManager.userInterface
-
                 try {
+                    GroupManager.postReload(proxyGroup.id)
+                    val subscription = currentGroup.subscription!!
+                    val connected = DataStore.serviceState.connected
+                    val userInterface = GroupManager.userInterface
                     if (byUser && (subscription.link?.startsWith("http://") == true || subscription.updateWhenConnectedOnly) && !connected) {
                         if (userInterface == null || !userInterface.confirm(app.getString(R.string.update_subscription_warning))) {
                             return@coroutineScope true
                         }
                     }
 
-                    try {
-                        withTimeout(SUBSCRIPTION_UPDATE_TIMEOUT_MILLIS) {
-                            RawUpdater.doUpdate(proxyGroup, subscription, userInterface, byUser)
-                        }
-                        true
-                    } catch (e: TimeoutCancellationException) {
-                        Logs.w(e)
-                        userInterface?.onUpdateFailure(
-                            proxyGroup,
-                            app.getString(
-                                R.string.subscription_update_timeout,
-                                TimeUnit.MILLISECONDS.toSeconds(SUBSCRIPTION_UPDATE_TIMEOUT_MILLIS)
-                            )
-                        )
-                        false
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Throwable) {
-                        Logs.w(e)
-                        userInterface?.onUpdateFailure(proxyGroup, e.readableMessage)
-                        false
-                    }
+                    guard.run(
+                        update = { group ->
+                            withTimeout(SUBSCRIPTION_UPDATE_TIMEOUT_MILLIS) {
+                                RawUpdater.doUpdate(group, group.subscription!!, userInterface, byUser)
+                            }
+                        },
+                        onFailure = { group, error ->
+                            Logs.w(error)
+                            val message = if (error is TimeoutCancellationException) {
+                                app.getString(
+                                    R.string.subscription_update_timeout,
+                                    TimeUnit.MILLISECONDS.toSeconds(SUBSCRIPTION_UPDATE_TIMEOUT_MILLIS),
+                                )
+                            } else error.readableMessage
+                            userInterface?.onUpdateFailure(group, message)
+                        },
+                    )
                 } finally {
                     synchronized(activeJobs) {
                         if (activeJobs[proxyGroup.id] === updateJob) {

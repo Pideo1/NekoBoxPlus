@@ -46,3 +46,31 @@ func TestMASQUEOutboundOptionsCompatibility(t *testing.T) {
 		t.Fatalf("fallback timeout = %s", time.Duration(options.H3FallbackTimeout))
 	}
 }
+
+func TestMASQUEConfigEndpointHost(t *testing.T) {
+	config := MASQUEConfig{
+		EndpointV4: "h3-v4.example", EndpointV6: "h3-v6.example",
+		EndpointH2V4: "h2-v4.example", EndpointH2V6: "h2-v6.example",
+	}
+	for _, test := range []struct {
+		http2 bool
+		ipv6  bool
+		want  string
+	}{
+		{false, false, "h3-v4.example"},
+		{false, true, "h3-v6.example"},
+		{true, false, "h2-v4.example"},
+		{true, true, "h2-v6.example"},
+	} {
+		if host := config.EndpointHost(test.http2, test.ipv6); host != test.want {
+			t.Fatalf("EndpointHost(%v, %v) = %q, want %q", test.http2, test.ipv6, host, test.want)
+		}
+	}
+	config.EndpointH2V4 = ""
+	config.EndpointH2V6 = ""
+	for _, ipv6 := range []bool{false, true} {
+		if host := config.EndpointHost(true, ipv6); host != config.EndpointHost(false, ipv6) {
+			t.Fatalf("HTTP/2 fallback host = %q", host)
+		}
+	}
+}

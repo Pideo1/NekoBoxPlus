@@ -491,7 +491,10 @@ func formatAWGEndpoint(host string, port uint16) string {
 	return net.JoinHostPort(unwrappedHost, strconv.Itoa(int(port)))
 }
 
-func (e *Endpoint) Start(stage adapter.StartStage) error {
+func (e *Endpoint) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(e.Close)
+	}
 	e.deviceAccess.Lock()
 	defer e.deviceAccess.Unlock()
 	if e.deferredDevice != nil {

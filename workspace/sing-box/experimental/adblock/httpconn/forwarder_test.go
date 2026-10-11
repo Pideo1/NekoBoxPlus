@@ -27,7 +27,7 @@ func (s testCertificateStore) Name() string {
 	return "test-certificate-store"
 }
 
-func (s testCertificateStore) Start(adapter.StartStage) error {
+func (s testCertificateStore) Start(adapter.StartStage, *adapter.Scope) error {
 	return nil
 }
 

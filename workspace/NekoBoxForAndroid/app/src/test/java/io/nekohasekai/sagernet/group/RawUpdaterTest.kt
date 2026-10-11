@@ -84,6 +84,26 @@ class RawUpdaterTest {
     }
 
     @Test
+    fun `provider update preserves all saved device overrides`() {
+        val current = SubscriptionBean().applyDefaultValues().apply {
+            hwidEnabled = true
+            hwid = "custom-id"
+            spoofDevice = true
+            devicePresetId = "android_Pixel_10_16"
+            deviceHeaders = "{\"X-Device-Model\":\"\"}"
+            customUserAgent = "custom-agent"
+        }
+        val updated = SubscriptionBean().applyDefaultValues()
+        mergeCurrentSubscriptionSettings(current, updated)
+        assertEquals(current.hwidEnabled, updated.hwidEnabled)
+        assertEquals(current.hwid, updated.hwid)
+        assertEquals(current.spoofDevice, updated.spoofDevice)
+        assertEquals(current.devicePresetId, updated.devicePresetId)
+        assertEquals(current.deviceHeaders, updated.deviceHeaders)
+        assertEquals(current.customUserAgent, updated.customUserAgent)
+    }
+
+    @Test
     fun `merge keeps first provider defaults when they were not consumed`() {
         val current = SubscriptionBean().applyDefaultValues().apply {
             autoUpdate = false

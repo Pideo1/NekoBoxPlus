@@ -21,7 +21,7 @@ type startupEndpoint struct {
 func (e *startupEndpoint) Tag() string            { return e.tag }
 func (e *startupEndpoint) Type() string           { return "test" }
 func (e *startupEndpoint) Dependencies() []string { return e.dependencies }
-func (e *startupEndpoint) Start(stage adapter.StartStage) error {
+func (e *startupEndpoint) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage == adapter.StartStatePostStart && e.start != nil {
 		return e.start()
 	}
@@ -52,7 +52,7 @@ func TestPostStartInitializesFrontEndpointBeforeDependent(t *testing.T) {
 			selected.dependencies = []string{"selector"}
 		}
 		ctx := service.ContextWith[adapter.OutboundManager](t.Context(), outbounds)
-		manager := NewManager(ctx, log.NewNOPFactory().Logger(), nil)
+		manager := NewManager(ctx, nil)
 		manager.endpoints = []adapter.Endpoint{selected, front}
 		manager.endpointByTag = map[string]adapter.Endpoint{"selected": selected, "front": front}
 		selected.start = func() error {
@@ -64,7 +64,9 @@ func TestPostStartInitializesFrontEndpointBeforeDependent(t *testing.T) {
 			return nil
 		}
 		done := make(chan error, 1)
-		go func() { done <- manager.Start(adapter.StartStatePostStart) }()
+		go func() {
+			done <- manager.Start(adapter.StartStatePostStart, adapter.NewScope(ctx, log.NewNOPFactory().Logger()))
+		}()
 		select {
 		case err := <-done:
 			if err != nil {

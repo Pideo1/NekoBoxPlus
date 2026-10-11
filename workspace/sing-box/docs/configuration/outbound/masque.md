@@ -18,6 +18,8 @@ MASQUE tunnels complete IP packets through Cloudflare WARP using CONNECT-IP over
 
 The existing `profile` object controls Cloudflare enrollment and cached credentials. The existing `config` object can still provide enrolled key material and endpoints directly.
 
+The `config.endpoint_v4`, `config.endpoint_v6`, `config.endpoint_h2_v4`, and `config.endpoint_h2_v6` fields accept IP addresses or hostnames. Hostnames are resolved using the configured domain resolver, with the same detour-aware DNS selection as WireGuard endpoints. `use_ipv6` selects IPv6 DNS results; otherwise IPv4 results are used. Only endpoints needed by the selected transport are resolved.
+
 ### Transport fields
 
 #### transport

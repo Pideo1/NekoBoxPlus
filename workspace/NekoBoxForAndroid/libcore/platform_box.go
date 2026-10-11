@@ -2,6 +2,7 @@ package libcore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"libcore/procfs"
 	"log"
@@ -51,6 +52,9 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformAutoDetectInterfaceControl() bo
 }
 
 func (w *boxPlatformInterfaceWrapper) AutoDetectInterfaceControl(fd int) error {
+	if currentTProxyClient() != nil {
+		return TProxyProtect(int32(fd))
+	}
 	// call protect_path
 	if !isBgProcess {
 		err := sendFdToProtect(fd, protectPath)
@@ -234,7 +238,15 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformConnectionOwnerFinder() bool {
 
 func (w *boxPlatformInterfaceWrapper) FindConnectionOwner(request *adapter.FindConnectionOwnerRequest) (*adapter.ConnectionOwner, error) {
 	var uid int32
-	if useProcfs {
+	if client := currentTProxyClient(); client != nil {
+		var err error
+		uid, err = tproxyConnectionOwner(client, request.IpProtocol, request.SourceAddress, request.SourcePort, request.DestinationAddress, request.DestinationPort)
+		if err != nil {
+			// The existing system/unrecognized-traffic policy handles missing identity;
+			// never let an ownership failure evade the device package guards.
+			return &adapter.ConnectionOwner{UserId: -1, AndroidPackageNames: []string{"android"}}, nil
+		}
+	} else if useProcfs {
 		sourceAddr, _ := netip.ParseAddr(request.SourceAddress)
 		source := netip.AddrPortFrom(sourceAddr, uint16(request.SourcePort))
 		destAddr, _ := netip.ParseAddr(request.DestinationAddress)
@@ -263,6 +275,15 @@ func (w *boxPlatformInterfaceWrapper) FindConnectionOwner(request *adapter.FindC
 	var packageNames []string
 	if packageName != "" {
 		packageNames = []string{packageName}
+	}
+	if currentTProxyClient() != nil && uid > 1000 {
+		namesJSON, err := intfBox.PackageNamesByUid(uid)
+		if err == nil {
+			_ = json.Unmarshal([]byte(namesJSON), &packageNames)
+		}
+		if len(packageNames) == 0 {
+			packageNames = []string{"android"}
+		}
 	}
 	return &adapter.ConnectionOwner{UserId: uid, AndroidPackageNames: packageNames}, nil
 }

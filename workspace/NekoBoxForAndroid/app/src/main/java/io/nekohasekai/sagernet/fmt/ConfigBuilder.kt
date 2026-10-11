@@ -316,6 +316,11 @@ fun buildConfig(
     var pushedDnsDefaultTag: String? = null
     val groupCache = HashMap<Long, ProxyGroup?>()
     val isVPN = DataStore.serviceMode == Key.MODE_VPN
+    val isTProxy = DataStore.serviceMode == Key.MODE_TPROXY
+    val isCapturing = isVPN || isTProxy
+    val deviceCaptureTags = if (isTProxy) tproxyDeviceTags(DataStore.ipv6Mode) else listOf(TAG_TUN)
+    val allCaptureTags = deviceCaptureTags + if (isTProxy && DataStore.tproxyTethering) tproxyTetherTags(DataStore.ipv6Mode) else emptyList()
+    val hasMixed = DataStore.serviceMode == Key.MODE_PROXY || DataStore.requireProxyInVPN
     val udpNatSettings =
         UdpNatSettings.fromPreferences(
             mapping = DataStore.udpNatMapping,
@@ -366,19 +371,18 @@ fun buildConfig(
                                 // }
                             }
 
-                        clash_api =
-                            ClashAPIOptions().apply {
-                                if (DataStore.enableClashAPI) {
-                                    external_controller =
-                                        when (DataStore.hideClashApi) {
-                                            true -> "unix://../cache/${DataStore.CLASH_API_SOCKET_NAME}"
-                                            false -> "${DataStore.CLASH_API_HOST}:${DataStore.CLASH_API_PORT}"
-                                        }
-                                    external_ui = DataStore.CLASH_API_EXTERNAL_UI
-                                    external_ui_download_url = DataStore.CLASH_API_EXTERNAL_UI_DOWNLOAD_URL
-                                    secret = DataStore.clashApiSecret
-                                }
+                        if (DataStore.enableClashAPI) {
+                            clash_api = ClashAPIOptions().apply {
+                                external_controller =
+                                    when (DataStore.hideClashApi) {
+                                        true -> "unix://../cache/${DataStore.CLASH_API_SOCKET_NAME}"
+                                        false -> "${DataStore.CLASH_API_HOST}:${DataStore.CLASH_API_PORT}"
+                                    }
+                                external_ui = DataStore.CLASH_API_EXTERNAL_UI
+                                external_ui_download_url = DataStore.CLASH_API_EXTERNAL_UI_DOWNLOAD_URL
+                                secret = DataStore.clashApiSecret
                             }
+                        }
                     }
             }
 
@@ -473,7 +477,30 @@ fun buildConfig(
                     )
                 }
 
-                if (!isVPN || DataStore.requireProxyInVPN) {
+                if (isTProxy) {
+                    val ports = io.nekohasekai.sagernet.bg.TProxyManager.ports.takeIf { it.size == 4 }
+                        ?: listOf(32080, 32081, 32082, 32083) // Preview/export never requests root.
+                    fun transparentInbound(tagValue: String, address: String, portNumber: Int) =
+                        Inbound_TProxyOptions().apply {
+                            type = "tproxy"
+                            tag = tagValue
+                            listen = address
+                            listen_port = portNumber
+                            udp_mapping = udpNatSettings.mapping
+                            udp_filtering = udpNatSettings.filtering
+                            udp_nat_max = udpNatSettings.maxSessions
+                        }
+                    if (ipv6Mode != IPv6Mode.ONLY) {
+                        inbounds.add(transparentInbound("tproxy-in4", "0.0.0.0", ports[0]))
+                        if (DataStore.tproxyTethering) inbounds.add(transparentInbound("tproxy-tether-in4", "0.0.0.0", ports[2]))
+                    }
+                    if (ipv6Mode != IPv6Mode.DISABLE) {
+                        inbounds.add(transparentInbound("tproxy-in6", "::", ports[1]))
+                        if (DataStore.tproxyTethering) inbounds.add(transparentInbound("tproxy-tether-in6", "::", ports[3]))
+                    }
+                }
+
+                if (hasMixed) {
                     inbounds.add(
                         Inbound_MixedOptions().apply {
                             type = "mixed"
@@ -564,7 +591,26 @@ fun buildConfig(
                 ) {
                     outbound.setDetour(detourTag)
                     val bean = proxyEntity.requireBean()
-                    if ((bean is WireGuardBean || bean is AmneziaWGBean) && !bean.serverAddress.isIpAddress()) {
+                    val endpointHost = when (bean) {
+                        is WireGuardBean, is AmneziaWGBean -> bean.serverAddress
+                        is MasqueBean -> {
+                            if (bean.profileRecreate == true) {
+                                ""
+                            } else if (bean.useHTTP2 == true) {
+                                if (bean.useIPv6 == true) {
+                                    bean.configEndpointH2V6.orEmpty().ifBlank { bean.configEndpointV6.orEmpty() }
+                                } else {
+                                    bean.configEndpointH2V4.orEmpty()
+                                }
+                            } else if (bean.useIPv6 == true) {
+                                bean.configEndpointV6.orEmpty()
+                            } else {
+                                bean.configEndpointV4.orEmpty()
+                            }
+                        }
+                        else -> ""
+                    }
+                    if (endpointHost.isNotBlank() && !endpointHost.isIpAddress()) {
                         val resolverTag = "dns-bootstrap-${endpointBootstrapDNS.size + 1}"
                         endpointBootstrapDNS[resolverTag] = detourTag
                         outbound.setGeneratedOptionField(
@@ -1158,7 +1204,7 @@ fun buildConfig(
 
                 route.rules.add(
                     Rule_DefaultOptions().apply {
-                        inbound = listOf(TAG_TUN)
+                        inbound = allCaptureTags
                         outbound = mainProxyTag
                     },
                 )
@@ -1216,7 +1262,7 @@ fun buildConfig(
                     val uidList =
                         rule.packages
                             .map {
-                                if (!isVPN) {
+                                if (!isCapturing) {
                                     showConfigToast(
                                         SagerNet.application.getString(R.string.route_need_vpn, rule.displayName()),
                                         Toast.LENGTH_SHORT,
@@ -1374,15 +1420,15 @@ fun buildConfig(
                 }
 
                 // System per-app enforcement rules: prevent force-bound apps from
-                // leaking through the wrong outbound. Only apply them to the TUN
-                // inbound so the optional local mixed/SOCKS listener stays usable.
-                if (isVPN && DataStore.proxyApps) {
+                // leaking through the wrong outbound. Apply them to device capture
+                // inbounds so optional local listeners and tethered clients stay usable.
+                if (isCapturing && (DataStore.proxyApps || isTProxy)) {
                     // The background process loads PackageCache asynchronously. A service restart
                     // can reach config building before that initial load has completed.
                     PackageCache.awaitLoadSync()
-                    val bypassMode = DataStore.bypass
+                    val bypassMode = DataStore.proxyApps && DataStore.bypass
                     val configuredIndividualPackages =
-                        DataStore.individual
+                        DataStore.individual.takeIf { DataStore.proxyApps }.orEmpty()
                             .lineSequence()
                             .map { it.trim() }
                             .filter { it.isNotBlank() }
@@ -1395,7 +1441,9 @@ fun buildConfig(
                             configuredIndividualPackages + nonBypassPackageSet
                         }
                     val adblockProxyPackages =
-                        if (bypassMode) {
+                        if (!DataStore.proxyApps) {
+                            PackageCache.installedPackages.keys.toSet()
+                        } else if (bypassMode) {
                             (PackageCache.installedPackages.keys.toSet() - configuredIndividualPackages).toSet() + nonBypassPackageSet
                         } else {
                             nonBypassPackageSet + configuredIndividualPackages
@@ -1456,7 +1504,7 @@ fun buildConfig(
                         }
 
                     val packageRule =
-                        if (individualPackages.isNotEmpty()) {
+                        if (DataStore.proxyApps && individualPackages.isNotEmpty()) {
                             Rule_DefaultOptions().apply {
                                 inbound = listOf(TAG_TUN)
                                 package_name =
@@ -1728,8 +1776,8 @@ fun buildConfig(
                 // Migrate legacy inbound sniff/domain_strategy to route rule actions (sing-box 1.13)
                 val routeActionInbounds =
                     buildList {
-                        if (isVPN) add(TAG_TUN)
-                        if (!isVPN || DataStore.requireProxyInVPN) add(TAG_MIXED)
+                        if (isCapturing) addAll(allCaptureTags)
+                        if (hasMixed) add(TAG_MIXED)
                     }
                 val domainStrategyStr =
                     destinationStrategyForIpv6Mode(dnsPlan.resolveDestination, ipv6Mode)
@@ -1754,7 +1802,7 @@ fun buildConfig(
                         )
                     }
                 }
-                if (isVPN && DataStore.requireProxyInVPN && DataStore.disableUdpForLocalProxy) {
+                if (isCapturing && DataStore.requireProxyInVPN && DataStore.disableUdpForLocalProxy) {
                     route.rules.add(
                         0,
                         Rule_DefaultOptions().apply {
@@ -1860,6 +1908,27 @@ fun buildConfig(
             if (!forTest) _hack_custom_config = DataStore.globalCustomConfig
         }.let {
             val configMap = it.asMap()
+            if (!forTest && isTProxy) {
+                val probePort = io.nekohasekai.sagernet.bg.TProxyManager.healthPort
+                if (probePort > 0) {
+                    listOf("203.0.113.254/32" to "127.0.0.2", "fdfe:ffff::1/128" to "::1").forEach { (address, target) ->
+                        @Suppress("UNCHECKED_CAST")
+                        val route = configMap["route"] as MutableMap<String, Any?>
+                        @Suppress("UNCHECKED_CAST")
+                        val rules = route["rules"] as MutableList<Any?>
+                        rules.add(0, mutableMapOf(
+                            "inbound" to deviceCaptureTags,
+                            "user_id" to listOf(0),
+                            "ip_cidr" to listOf(address),
+                            "port" to listOf(probePort),
+                            "action" to "route",
+                            "override_address" to target,
+                            "outbound" to TAG_DIRECT,
+                        ))
+                    }
+                }
+            }
+            if (isTProxy) retargetTunRules(configMap, deviceCaptureTags, allCaptureTags)
             Util.mergeJSON(configMap, proxy.requireBean().customConfigJson)
             configMap.sanitizeDNSRules114(
                 forcedStrategy = strictDnsStrategyForIpv6Mode(ipv6Mode),
@@ -1877,12 +1946,12 @@ fun buildConfig(
                 }
             }
 
-            if (!forTest && isVPN && (!DataStore.appendHttpProxy && !DataStore.requireProxyInVPN)) {
+            if (!forTest && isCapturing && (!DataStore.appendHttpProxy && !DataStore.requireProxyInVPN)) {
                 @Suppress("UNCHECKED_CAST")
                 val inboundsList = configMap["inbounds"] as? MutableList<MutableMap<String, Any?>>
                 inboundsList?.removeAll { inbound ->
                     val type = inbound["type"] as? String
-                    type != null && type != "tun" && type != "direct"
+                    type != null && type != "tun" && type != "tproxy" && type != "direct"
                 }
             }
 

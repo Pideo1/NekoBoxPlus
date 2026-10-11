@@ -3,6 +3,7 @@ package listener
 import (
 	"net"
 	"net/netip"
+	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +28,30 @@ func (l *Listener) ListenTCP() (net.Listener, error) {
 	}
 	var err error
 	bindAddr := M.SocksaddrFrom(l.listenOptions.Listen.Build(netip.AddrFrom4([4]byte{127, 0, 0, 1})), l.listenOptions.ListenPort)
+	if l.tproxy {
+		if factory := service.FromContext[adapter.TProxySocketFactory](l.ctx); factory != nil {
+			if l.listenOptions.NetNs != "" || l.listenOptions.BindInterface != "" || l.listenOptions.RoutingMark != 0 || l.listenOptions.TCPFastOpen || l.listenOptions.TCPMultiPath {
+				return nil, E.New("privileged TPROXY sockets do not support netns, bind_interface, routing_mark, TCP Fast Open or MPTCP")
+			}
+			fd, err := factory.OpenTProxySocket(M.NetworkFromNetAddr(N.NetworkTCP, bindAddr.Addr), bindAddr.String(), false)
+			if err != nil {
+				return nil, err
+			}
+			file := os.NewFile(uintptr(fd), "tproxy-tcp")
+			tcpListener, err := net.FileListener(file)
+			_ = file.Close()
+			if err != nil {
+				return nil, err
+			}
+			tcpListener = &tcpKeepAliveListener{
+				TCPListener:     tcpListener.(*net.TCPListener),
+				keepAliveConfig: l.tcpKeepAliveConfig(),
+			}
+			l.tcpListener = tcpListener
+			l.logger.Info("tcp server started at ", tcpListener.Addr())
+			return tcpListener, nil
+		}
+	}
 	var listenConfig net.ListenConfig
 	if l.listenOptions.BindInterface != "" {
 		listenConfig.Control = control.Append(listenConfig.Control, control.BindToInterface(service.FromContext[adapter.NetworkManager](l.ctx).InterfaceFinder(), l.listenOptions.BindInterface, -1))
@@ -37,23 +62,9 @@ func (l *Listener) ListenTCP() (net.Listener, error) {
 	if l.listenOptions.ReuseAddr {
 		listenConfig.Control = control.Append(listenConfig.Control, control.ReuseAddr())
 	}
-	if l.listenOptions.DisableTCPKeepAlive {
+	listenConfig.KeepAliveConfig = l.tcpKeepAliveConfig()
+	if !listenConfig.KeepAliveConfig.Enable {
 		listenConfig.KeepAlive = -1
-		listenConfig.KeepAliveConfig.Enable = false
-	} else {
-		keepIdle := time.Duration(l.listenOptions.TCPKeepAlive)
-		if keepIdle == 0 {
-			keepIdle = C.TCPKeepAliveInitial
-		}
-		keepInterval := time.Duration(l.listenOptions.TCPKeepAliveInterval)
-		if keepInterval == 0 {
-			keepInterval = C.TCPKeepAliveInterval
-		}
-		listenConfig.KeepAliveConfig = net.KeepAliveConfig{
-			Enable:   true,
-			Idle:     keepIdle,
-			Interval: keepInterval,
-		}
 	}
 	if l.listenOptions.TCPMultiPath {
 		listenConfig.SetMultipathTCP(true)
@@ -80,6 +91,44 @@ func (l *Listener) ListenTCP() (net.Listener, error) {
 	l.logger.Info("tcp server started at ", tcpListener.Addr())
 	l.tcpListener = tcpListener
 	return tcpListener, err
+}
+
+func (l *Listener) tcpKeepAliveConfig() net.KeepAliveConfig {
+	if l.listenOptions.DisableTCPKeepAlive {
+		return net.KeepAliveConfig{}
+	}
+	keepIdle := time.Duration(l.listenOptions.TCPKeepAlive)
+	if keepIdle == 0 {
+		keepIdle = C.TCPKeepAliveInitial
+	}
+	keepInterval := time.Duration(l.listenOptions.TCPKeepAliveInterval)
+	if keepInterval == 0 {
+		keepInterval = C.TCPKeepAliveInterval
+	}
+	return net.KeepAliveConfig{
+		Enable:   true,
+		Idle:     keepIdle,
+		Interval: keepInterval,
+	}
+}
+
+// net.FileListener uses Go's default keepalive settings, so brokered sockets
+// need the configured settings applied after each accept.
+type tcpKeepAliveListener struct {
+	*net.TCPListener
+	keepAliveConfig net.KeepAliveConfig
+}
+
+func (l *tcpKeepAliveListener) Accept() (net.Conn, error) {
+	conn, err := l.TCPListener.AcceptTCP()
+	if err != nil {
+		return nil, err
+	}
+	if err := conn.SetKeepAliveConfig(l.keepAliveConfig); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 func (l *Listener) loopTCPIn() {

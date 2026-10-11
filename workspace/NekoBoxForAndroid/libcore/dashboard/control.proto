@@ -1,0 +1,14 @@
+syntax = "proto3";
+package dashboard;
+import "google/protobuf/struct.proto";
+
+// Registered with existing Struct messages in server.go. No duplicate upstream
+// protobuf descriptors are generated or registered.
+service Control {
+  // Request: tag, url, timeout (milliseconds), attempts, pause (milliseconds),
+  // hardened. Response: latency (milliseconds). Errors use gRPC status.
+  rpc TestOutbound(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc ResetNetwork(google.protobuf.Struct) returns (google.protobuf.Struct);
+  // One-second samples: proxyUp, proxyDown, directUp, directDown, in bytes/s.
+  rpc SubscribeTraffic(google.protobuf.Struct) returns (stream google.protobuf.Struct);
+}

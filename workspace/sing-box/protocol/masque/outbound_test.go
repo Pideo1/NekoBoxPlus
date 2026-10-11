@@ -1,10 +1,15 @@
 package masque
 
 import (
+	"context"
+	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/json/badoption"
 )
@@ -86,5 +91,95 @@ func TestResolveTransportOptions(t *testing.T) {
 				t.Fatalf("got (%q, %d, %s), want (%q, %d, %s)", transport, mtu, timeout, test.wantTransport, test.wantMTU, test.wantTimeout)
 			}
 		})
+	}
+}
+
+func TestResolveEndpointAddress(t *testing.T) {
+	lookupError := errors.New("DNS unavailable")
+	tests := []struct {
+		name        string
+		host        string
+		useIPv6     bool
+		addresses   []netip.Addr
+		lookupError error
+		want        netip.Addr
+		wantLookup  bool
+		wantError   string
+	}{
+		{name: "IPv4 literal", host: "192.0.2.1", want: netip.MustParseAddr("192.0.2.1")},
+		{name: "IPv6 literal", host: "2001:db8::1", useIPv6: true, want: netip.MustParseAddr("2001:db8::1")},
+		{name: "hostname IPv4", host: "endpoint.example", addresses: []netip.Addr{netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("192.0.2.1")}, want: netip.MustParseAddr("192.0.2.1"), wantLookup: true},
+		{name: "hostname IPv6", host: "endpoint.example", useIPv6: true, addresses: []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1")}, want: netip.MustParseAddr("2001:db8::1"), wantLookup: true},
+		{name: "mapped IPv4", host: "endpoint.example", addresses: []netip.Addr{netip.MustParseAddr("::ffff:192.0.2.1")}, want: netip.MustParseAddr("192.0.2.1"), wantLookup: true},
+		{name: "missing", wantError: "missing endpoint"},
+		{name: "empty response", host: "endpoint.example", wantLookup: true, wantError: "no IPv4 address"},
+		{name: "no IPv6", host: "endpoint.example", useIPv6: true, addresses: []netip.Addr{netip.MustParseAddr("192.0.2.1")}, wantLookup: true, wantError: "no IPv6 address"},
+		{name: "DNS error", host: "endpoint.example", lookupError: lookupError, wantLookup: true, wantError: "DNS unavailable"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			lookedUp := false
+			address, err := resolveEndpointAddress(test.host, test.useIPv6, func(host string) ([]netip.Addr, error) {
+				lookedUp = true
+				if host != test.host {
+					t.Fatalf("lookup host = %q, want %q", host, test.host)
+				}
+				return test.addresses, test.lookupError
+			})
+			if lookedUp != test.wantLookup {
+				t.Fatalf("lookup called = %v, want %v", lookedUp, test.wantLookup)
+			}
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("error = %v, want %q", err, test.wantError)
+				}
+				if test.lookupError != nil && !errors.Is(err, test.lookupError) {
+					t.Fatalf("error does not wrap DNS error: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if address != test.want {
+				t.Fatalf("address = %s, want %s", address, test.want)
+			}
+		})
+	}
+}
+
+func TestScopeCloseBeforeMASQUEInitializerStarts(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	outbound := &Outbound{ctx: ctx, cancel: cancel, await: make(chan struct{})}
+	scope := adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())
+	if err := outbound.Start(adapter.StartStateInitialize, scope); err != nil {
+		t.Fatal(err)
+	}
+	if err := scope.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("initializer context was not canceled")
+	}
+}
+
+func TestScopeCloseCancelsMASQUEInitializer(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	outbound := &Outbound{ctx: ctx, cancel: cancel, await: make(chan struct{})}
+	outbound.startHandler = func() { <-ctx.Done(); close(outbound.await) }
+	scope := adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())
+	if err := outbound.Start(adapter.StartStateInitialize, scope); err != nil {
+		t.Fatal(err)
+	}
+	if err := outbound.Start(adapter.StartStatePostStart, scope); err != nil {
+		t.Fatal(err)
+	}
+	if err := scope.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-outbound.await:
+	default:
+		t.Fatal("initializer is still running after scope close")
 	}
 }

@@ -7,8 +7,6 @@ import (
 	"net"
 	"sync"
 	"time"
-
-	"github.com/matsuridayo/libneko/protect_server"
 )
 
 var (
@@ -25,11 +23,11 @@ func ensureProtectLocked() {
 	if !isBgProcess && protectServerAvailable() {
 		return
 	}
-	protectCloser = protect_server.ServeProtect(protectPath, false, 0, func(fd int) {
-		if err := intfBox.AutoDetectInterfaceControl(int32(fd)); err != nil {
-			log.Println("protect fd:", err)
-		}
-	})
+	var err error
+	protectCloser, err = serveCheckedProtect(protectPath)
+	if err != nil {
+		log.Println("start protect server:", err)
+	}
 }
 
 func protectServerAvailable() bool {

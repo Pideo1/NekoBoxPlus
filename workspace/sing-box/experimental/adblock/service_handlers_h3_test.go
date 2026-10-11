@@ -327,7 +327,7 @@ func (h3TestCertificateStore) Name() string {
 	return "test-certificate-store"
 }
 
-func (h3TestCertificateStore) Start(adapter.StartStage) error {
+func (h3TestCertificateStore) Start(adapter.StartStage, *adapter.Scope) error {
 	return nil
 }
 

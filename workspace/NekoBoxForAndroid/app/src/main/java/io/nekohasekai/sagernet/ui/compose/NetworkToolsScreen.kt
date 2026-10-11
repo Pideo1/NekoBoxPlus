@@ -26,6 +26,7 @@ fun NetworkToolsScreen(
     onSpeedTest: () -> Unit,
     onRuleSetMatch: () -> Unit,
     onCellularNetwork: () -> Unit,
+    onNetworkInterfaces: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -57,6 +58,12 @@ fun NetworkToolsScreen(
             summaryRes = R.string.cellular_network_summary,
             actionRes = R.string.cellular_network_open,
             onClick = onCellularNetwork,
+        )
+        NetworkToolCard(
+            titleRes = R.string.network_interfaces_title,
+            summaryRes = R.string.network_interfaces_summary,
+            actionRes = R.string.cellular_network_open,
+            onClick = onNetworkInterfaces,
         )
     }
 }

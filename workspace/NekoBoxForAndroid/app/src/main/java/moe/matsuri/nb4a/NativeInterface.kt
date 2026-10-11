@@ -108,6 +108,10 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
     //  libbox interface
 
     override fun autoDetectInterfaceControl(fd: Int) {
+        if (DataStore.serviceMode == Key.MODE_TPROXY) {
+            Libcore.tProxyProtect(fd)
+            return
+        }
         if (DataStore.serviceMode != Key.MODE_VPN) return
         val vpnService = DataStore.vpnService
             ?: throw Exception("no VpnService for socket protect")
@@ -149,6 +153,12 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
         }
 
         error("unknown uid $uid")
+    }
+
+    override fun packageNamesByUid(uid: Int): String {
+        PackageCache.awaitLoadSync()
+        return JSONArray(if (uid <= 1000) listOf("android") else
+            (app.packageManager.getPackagesForUid(uid)?.toList() ?: emptyList())).toString()
     }
 
     override fun uidByPackageName(packageName: String): Int {
@@ -314,9 +324,26 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
     override fun endpointAuthenticationRequired(protocol: String?, detail: String?) {
         Handler(Looper.getMainLooper()).post {
             val message = app.getString(R.string.endpoint_authentication_required, protocol ?: "VPN")
-            Logs.w(listOfNotNull(message, detail?.takeIf { it.isNotBlank() }).joinToString(" "))
-            Toast.makeText(app, message, Toast.LENGTH_LONG).show()
-            SagerNet.stopService()
+            if (DataStore.enableClashAPI) {
+                Logs.w(listOfNotNull(message, detail?.takeIf { it.isNotBlank() }).joinToString(" "))
+                Toast.makeText(app, message, Toast.LENGTH_LONG).show()
+                SagerNet.stopService()
+            } else {
+                val body = app.getString(R.string.dashboard_authentication_pending)
+                Toast.makeText(app, "$message $body", Toast.LENGTH_LONG).show()
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                    ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                    val contentIntent = PendingIntent.getActivity(app, 7,
+                        Intent(app, io.nekohasekai.sagernet.ui.MainActivity::class.java)
+                            .setAction(io.nekohasekai.sagernet.ui.MainActivity.ACTION_SHOW_DASHBOARD),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                    val notification = NotificationCompat.Builder(app, "sing-box-authentication")
+                        .setSmallIcon(R.drawable.ic_service_active).preferSmallIcon()
+                        .setContentTitle(message).setContentText(body).setContentIntent(contentIntent)
+                        .setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH).build()
+                    runCatching { NotificationManagerCompat.from(app).notify("dashboard-authentication".hashCode(), notification) }
+                }
+            }
         }
     }
 

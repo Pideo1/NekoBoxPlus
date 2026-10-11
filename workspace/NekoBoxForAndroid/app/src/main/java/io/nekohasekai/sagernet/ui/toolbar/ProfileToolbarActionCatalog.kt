@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.ui.toolbar
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.database.DataStore
 
 enum class ProfileToolbarActionKind {
     ACTION,
@@ -77,7 +78,12 @@ object ProfileToolbarActionCatalog {
         check(byId.size == ProfileToolbarActionId.entries.size)
     }
 
-    operator fun get(id: ProfileToolbarActionId): ProfileToolbarAction = requireNotNull(byId[id])
+    operator fun get(id: ProfileToolbarActionId): ProfileToolbarAction {
+        val action = requireNotNull(byId[id])
+        return if (id == ProfileToolbarActionId.NAV_DASHBOARD && !DataStore.enableClashAPI) {
+            action.copy(titleRes = R.string.integrated_dashboard, iconRes = R.drawable.ic_dashboard_24)
+        } else action
+    }
 
     private fun action(id: ProfileToolbarActionId, titleRes: Int, iconRes: Int) =
         ProfileToolbarAction(id, titleRes, iconRes)

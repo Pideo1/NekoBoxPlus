@@ -49,6 +49,7 @@ type Inbound struct {
 	transport  adapter.V2RayServerTransport
 	decryption *encryption.ServerInstance
 	vision     bool
+	references []string
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VLESSInboundOptions) (adapter.Inbound, error) {
@@ -90,6 +91,9 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		if err != nil {
 			return nil, err
 		}
+		if options.TLS.Reality != nil && options.TLS.Reality.Enabled && options.TLS.Reality.Handshake.Detour != "" {
+			inbound.references = []string{options.TLS.Reality.Handshake.Detour}
+		}
 	}
 	if options.Transport != nil {
 		inbound.transport, err = v2ray.NewServerTransport(ctx, logger, common.PtrValueOrDefault(options.Transport), inbound.tlsConfig, (*inboundTransportHandler)(inbound))
@@ -119,7 +123,12 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	return inbound, nil
 }
 
-func (h *Inbound) Start(stage adapter.StartStage) error {
+func (h *Inbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize && h.decryption != nil {
+		scope.Add(func() error {
+			return h.decryption.Close()
+		})
+	}
 	if stage != adapter.StartStateStart {
 		return nil
 	}
@@ -128,10 +137,18 @@ func (h *Inbound) Start(stage adapter.StartStage) error {
 		if err != nil {
 			return err
 		}
+		scope.Add(h.tlsConfig.Close)
 	}
 	if h.transport == nil {
-		return h.listener.Start()
+		err := h.listener.Start()
+		if err != nil {
+			return err
+		}
+		scope.Add(h.listener.Close)
+		return nil
 	}
+	scope.Add(h.transport.Close)
+	scope.Add(h.listener.Close)
 	if common.Contains(h.transport.Network(), N.NetworkTCP) {
 		tcpListener, err := h.listener.ListenTCP()
 		if err != nil {
@@ -157,18 +174,6 @@ func (h *Inbound) Start(stage adapter.StartStage) error {
 		}()
 	}
 	return nil
-}
-
-func (h *Inbound) Close() error {
-	if h.decryption != nil {
-		h.decryption.Close()
-	}
-	return common.Close(
-		h.service,
-		h.listener,
-		h.tlsConfig,
-		h.transport,
-	)
 }
 
 func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
@@ -350,4 +355,8 @@ func (h *inboundTransportHandler) NewConnectionEx(ctx context.Context, conn net.
 	//nolint:staticcheck
 	h.logger.InfoContext(ctx, "inbound connection from ", metadata.Source)
 	(*Inbound)(h).newConnectionExInternal(ctx, conn, metadata, onClose, false)
+}
+
+func (h *Inbound) References() []string {
+	return h.references
 }

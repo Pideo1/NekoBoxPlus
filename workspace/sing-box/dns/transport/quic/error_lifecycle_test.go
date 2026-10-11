@@ -157,7 +157,7 @@ func TestQUICExchangeStopsAfterUnderlyingStreamError(t *testing.T) {
 		}),
 	}
 	defer func() {
-		if err := dnsTransport.Close(); err != nil {
+		if err := dnsTransport.connection.Close(); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -192,7 +192,7 @@ func TestHTTP3ExchangeStopsAfterUnderlyingStreamError(t *testing.T) {
 	}
 	dnsTransport.transport = dnsTransport.newTransport()
 	defer func() {
-		if err := dnsTransport.Close(); err != nil {
+		if err := dnsTransport.transport.Close(); err != nil {
 			t.Error(err)
 		}
 	}()

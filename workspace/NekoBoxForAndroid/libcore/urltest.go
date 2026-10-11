@@ -59,6 +59,14 @@ func newInstanceURLTest(config, tag, link string, timeout int32, standard int32,
 }
 
 func (b *BoxInstance) urlTest(tag, link string, timeout int32, attempts int32, pause int32, hardened bool) (latency int32, err error) {
+	return b.urlTestContext(b.ctx, tag, link, timeout, attempts, pause, hardened)
+}
+
+func (b *BoxInstance) urlTestContext(parent context.Context, tag, link string, timeout int32, attempts int32, pause int32, hardened bool) (latency int32, err error) {
+	ctx, cancel := context.WithCancel(parent)
+	stop := context.AfterFunc(b.ctx, cancel)
+	defer cancel()
+	defer stop()
 	var detour adapter.Outbound
 	if tag == "" {
 		detour = b.Outbound().Default()
@@ -74,7 +82,7 @@ func (b *BoxInstance) urlTest(tag, link string, timeout int32, attempts int32, p
 	if err != nil {
 		return -1, err
 	}
-	return runURLTestAfterOutboundReady(b.ctx, b.Outbound(), detour, timeout, attempts, pause, func(ctx context.Context) (int32, error) {
+	return runURLTestAfterOutboundReady(ctx, b.Outbound(), detour, timeout, attempts, pause, func(ctx context.Context) (int32, error) {
 		testDialer := N.Dialer(&fallbackURLTestDialer{
 			Dialer:         detour,
 			localTransport: b.localDNS,

@@ -186,3 +186,12 @@ func (h *Outbound) wrapConn(network string, conn net.Conn) net.Conn {
 	}
 	return NewTLSFragmentConn(conn, h.splitRecord, h.splitPacket)
 }
+
+func (h *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(h.Close)
+	}
+	return nil
+}
+
+var _ adapter.Lifecycle = (*Outbound)(nil)

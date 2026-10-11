@@ -13,6 +13,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/experimental/cachefile"
 	"github.com/sagernet/sing-box/experimental/clashmode"
+	boxLog "github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/filemanager"
 )
@@ -64,14 +65,15 @@ func LoadClashModeFromCache(cacheFilePath string) (mode string, err error) {
 	defer device.DeferPanicToError("LoadClashModeFromCache", func(err_ error) { err = err_ })
 
 	ctx := filemanager.WithDefault(service.ContextWithDefaultRegistry(context.Background()), workingPath, tempPath, os.Getuid(), os.Getgid())
+	scope := adapter.NewScope(ctx, boxLog.NewNOPFactory().Logger())
+	defer scope.Close()
 	cacheFile := cachefile.NewReadOnly(ctx, cacheFilePath)
-	if err = cacheFile.Start(adapter.StartStateInitialize); err != nil {
+	if err = cacheFile.Start(adapter.StartStateInitialize, scope); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return "", nil
 		}
 		return "", err
 	}
-	defer cacheFile.Close()
 	return cacheFile.LoadMode(), nil
 }
 

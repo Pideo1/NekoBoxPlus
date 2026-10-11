@@ -3948,6 +3948,10 @@ class ConfigurationFragment @JvmOverloads constructor(
         closeProfileSearch()
     }
 
+    fun refreshDashboardToolbar() {
+        if (isAdded && view != null) renderQuickToolbarActions()
+    }
+
     private fun renderQuickToolbarActions() {
         val container = quickToolbarActions ?: return
         container.removeAllViews()
