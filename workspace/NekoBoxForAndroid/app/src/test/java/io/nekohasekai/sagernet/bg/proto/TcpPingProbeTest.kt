@@ -22,6 +22,22 @@ class TcpPingProbeTest {
     }
 
     @Test
+    fun `tries IPv4 when IPv6 times out`() {
+        val attempted = mutableListOf<String>()
+        val outcome = probe(
+            addresses = listOf("2001:db8::1", "192.0.2.1"),
+            ping = { address ->
+                attempted += address
+                if (address.contains(':')) error("i/o timeout: timed out")
+                42
+            },
+        ).execute(request())
+
+        assertEquals(TcpPingOutcome.Success(42, "192.0.2.1"), outcome)
+        assertEquals(listOf("2001:db8::1", "192.0.2.1"), attempted)
+    }
+
+    @Test
     fun `does not hide a refused connection behind later addresses`() {
         val attempted = mutableListOf<String>()
         val outcome = probe(

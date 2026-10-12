@@ -103,11 +103,11 @@ func InitCore(process, cachePath, internalAssets, externalAssets string,
 	useProcfs = intfBox.UseProcFS()
 	gLocalDNSTransport = newPlatformTransport(if3, "", option.LocalDNSServerOptions{})
 	protect.SetProtector(func(fd int) error {
+		if !isBgProcess {
+			return intfBox.AutoDetectInterfaceControl(int32(fd))
+		}
 		if currentTProxyClient() != nil {
 			return TProxyProtect(int32(fd))
-		}
-		if !isBgProcess {
-			return sendFdToProtect(fd, protectPath)
 		}
 		return intfBox.AutoDetectInterfaceControl(int32(fd))
 	})

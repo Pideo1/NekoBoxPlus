@@ -236,6 +236,12 @@ func (f *Firewall) prepareFamily(bin, family string, c Config, enabled bool, por
 				return err
 			}
 		}
+		// Network.bindSocket sets Android's explicitlySelected network mark.
+		// Let our UI probes use that physical network without a root broker;
+		// other apps must still be captured even when they bind their sockets.
+		if err := appendRule(table, chain, "-m", "owner", "--uid-owner", strconv.Itoa(c.UID), "-m", "mark", "--mark", "0x10000/0x10000", "-j", "RETURN"); err != nil {
+			return err
+		}
 		base := c.UID / 100000 * 100000
 		if err := appendRule(table, chain, "-m", "owner", "!", "--uid-owner", fmt.Sprintf("%d-%d", base, base+99999), "-j", "RETURN"); err != nil {
 			return err

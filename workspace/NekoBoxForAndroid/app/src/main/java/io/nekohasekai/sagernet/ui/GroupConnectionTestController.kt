@@ -314,7 +314,7 @@ object GroupConnectionTestController {
                         TcpPingRequest(
                             host = bean.serverAddress,
                             port = bean.serverPort.toString(),
-                            timeoutMillis = 3_000,
+                            timeoutMillis = DataStore.connectionGroupTestTimeout,
                             hardened = DataStore.connectionTestHardened,
                             hostIsIpAddress = bean.serverAddress.isIpAddress(),
                         ),

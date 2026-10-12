@@ -16,6 +16,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Build.VERSION_CODES
 import android.os.Handler
+import android.os.ParcelFileDescriptor
 import android.os.Looper
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
@@ -109,14 +110,30 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
 
     override fun autoDetectInterfaceControl(fd: Int) {
         if (DataStore.serviceMode == Key.MODE_TPROXY) {
-            Libcore.tProxyProtect(fd)
+            if (SagerNet.application.process.endsWith(":bg")) {
+                Libcore.tProxyProtect(fd)
+            } else {
+                // UI probes must not wait for a root session or use the active proxy.
+                bindToUnderlyingNetwork(fd)
+            }
             return
         }
         if (DataStore.serviceMode != Key.MODE_VPN) return
         val vpnService = DataStore.vpnService
-            ?: throw Exception("no VpnService for socket protect")
+        if (vpnService == null) {
+            bindToUnderlyingNetwork(fd)
+            return
+        }
         if (!vpnService.protect(fd)) {
             throw Exception("VpnService.protect failed")
+        }
+    }
+
+    private fun bindToUnderlyingNetwork(fd: Int) {
+        val network = SagerNet.underlyingNetwork
+            ?: throw Exception("no underlying network for socket protect")
+        ParcelFileDescriptor.fromFd(fd).use { socket ->
+            network.bindSocket(socket.fileDescriptor)
         }
     }
 

@@ -52,16 +52,12 @@ func (w *boxPlatformInterfaceWrapper) UsePlatformAutoDetectInterfaceControl() bo
 }
 
 func (w *boxPlatformInterfaceWrapper) AutoDetectInterfaceControl(fd int) error {
+	// UI tests bind locally, without contacting the active service/root broker.
+	if !isBgProcess {
+		return intfBox.AutoDetectInterfaceControl(int32(fd))
+	}
 	if currentTProxyClient() != nil {
 		return TProxyProtect(int32(fd))
-	}
-	// call protect_path
-	if !isBgProcess {
-		err := sendFdToProtect(fd, protectPath)
-		if err != nil && w.forTest && !w.strictProtect {
-			return nil
-		}
-		return err
 	}
 	// bg process call VPNService
 	return intfBox.AutoDetectInterfaceControl(int32(fd))

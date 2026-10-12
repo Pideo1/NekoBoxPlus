@@ -211,3 +211,34 @@ func TestDisabledFamilyRejectsAndPreservesNetdMarks(t *testing.T) {
 		t.Fatal("disabled family can escape")
 	}
 }
+
+func TestExplicitNetworkBypassIsLimitedToOwnUIDBeforeCapture(t *testing.T) {
+	f, x, c := fixture(t)
+	if err := f.Prepare(c); err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range []string{"iptables", "ip6tables"} {
+		for _, chain := range []string{"NB4A_10123_O", "NB4A_10123_F"} {
+			bypassIndex, captureIndex := -1, -1
+			for index, cmd := range x.commands {
+				if !strings.HasPrefix(cmd, family+" ") || !strings.Contains(cmd, "-A "+chain+" ") {
+					continue
+				}
+				if strings.Contains(cmd, "0x10000/0x10000") {
+					if !strings.Contains(cmd, "--uid-owner 10123 -m mark --mark 0x10000/0x10000 -j RETURN") {
+						t.Fatalf("explicit network bypass is not scoped to our UID: %s", cmd)
+					}
+					bypassIndex = index
+				}
+				if strings.Contains(cmd, "--set-xmark") || strings.Contains(cmd, "-j REJECT") {
+					if captureIndex < 0 {
+						captureIndex = index
+					}
+				}
+			}
+			if bypassIndex < 0 || captureIndex < 0 || bypassIndex >= captureIndex {
+				t.Fatalf("%s %s: bypass %d must precede capture/reject %d", family, chain, bypassIndex, captureIndex)
+			}
+		}
+	}
+}

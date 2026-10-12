@@ -56,7 +56,10 @@ internal class TcpPingProbe(
                 failure(error).also { lastFailure = it }
             }
             if (result is TcpPingOutcome.Success) return result
-            if ((result as TcpPingOutcome.Failure).kind != PingFailureKind.Unreachable) return result
+            when ((result as TcpPingOutcome.Failure).kind) {
+                PingFailureKind.Unreachable, PingFailureKind.Timeout -> continue
+                else -> return result
+            }
         }
         return lastFailure ?: TcpPingOutcome.Failure(PingFailureKind.Unreachable, "")
     }

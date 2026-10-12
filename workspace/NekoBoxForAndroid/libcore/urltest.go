@@ -298,14 +298,25 @@ func dialResolvedURLTestAddresses(
 		return nil, err
 	}
 	var dialErrors []error
-	for _, resolvedAddress := range addresses {
-		conn, dialErr := dialContext(ctx, network, net.JoinHostPort(resolvedAddress.String(), port))
+	for index, resolvedAddress := range addresses {
+		attemptCtx, cancel := probeAddressContext(ctx, len(addresses)-index)
+		conn, dialErr := dialContext(attemptCtx, network, net.JoinHostPort(resolvedAddress.String(), port))
+		cancel()
 		if dialErr == nil {
 			return conn, nil
 		}
 		dialErrors = append(dialErrors, dialErr)
 	}
 	return nil, errors.Join(dialErrors...)
+}
+
+// Keep a stalled address from consuming the entire probe deadline before the
+// next address family gets a chance to connect.
+func probeAddressContext(ctx context.Context, remainingAddresses int) (context.Context, context.CancelFunc) {
+	if deadline, ok := ctx.Deadline(); ok && remainingAddresses > 1 {
+		return context.WithTimeout(ctx, time.Until(deadline)/time.Duration(remainingAddresses))
+	}
+	return context.WithCancel(ctx)
 }
 
 type asyncURLTestResult[T any] struct {
