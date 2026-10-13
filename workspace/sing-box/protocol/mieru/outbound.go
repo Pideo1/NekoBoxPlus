@@ -322,3 +322,12 @@ func beginAndEndPortFromPortRange(portRange string) (int, int, error) {
 	_, err := fmt.Sscanf(portRange, "%d-%d", &begin, &end)
 	return begin, end, err
 }
+
+func (o *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(o.Close)
+	}
+	return nil
+}
+
+var _ adapter.Lifecycle = (*Outbound)(nil)

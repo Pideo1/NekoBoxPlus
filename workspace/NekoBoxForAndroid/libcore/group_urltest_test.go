@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
 	M "github.com/sagernet/sing/common/metadata"
+	"github.com/sagernet/sing/service"
 )
 
 type fakeGroupURLTestResolver struct {
@@ -306,5 +308,76 @@ func TestRunHardenedTCPPingRetriesConnections(t *testing.T) {
 	}
 	if latency.latency < 0 || latency.address != "192.0.2.40" || calls.Load() != 3 {
 		t.Fatalf("result = %+v, dials = %d", latency, calls.Load())
+	}
+}
+
+func TestHardenedTCPPingTriesNextAddressAfterStall(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	addresses := []netip.Addr{netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("192.0.2.1")}
+	result, err := runHardenedTCPPing(ctx, addresses, "443", func(ctx context.Context, network, address string) (net.Conn, error) {
+		if address == "[2001:db8::1]:443" {
+			<-ctx.Done()
+			return nil, context.Cause(ctx)
+		}
+		client, server := net.Pipe()
+		server.Close()
+		return client, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.address != "192.0.2.1" {
+		t.Fatalf("address = %s", result.address)
+	}
+}
+
+func TestResolvedURLTestTriesNextAddressAfterStall(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	addresses := []netip.Addr{netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("192.0.2.1")}
+	conn, err := dialResolvedURLTestAddresses(ctx, "tcp", "test.example:443", addresses, func(ctx context.Context, network, address string) (net.Conn, error) {
+		if address == "[2001:db8::1]:443" {
+			<-ctx.Done()
+			return nil, context.Cause(ctx)
+		}
+		client, server := net.Pipe()
+		server.Close()
+		return client, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+}
+
+type groupURLTestDNSRouter struct {
+	adapter.DNSRouter
+}
+
+func (*groupURLTestDNSRouter) Lookup(context.Context, string, adapter.DNSQueryOptions) ([]netip.Addr, error) {
+	return []netip.Addr{netip.MustParseAddr("192.0.2.10")}, nil
+}
+
+func TestGroupURLTesterUsesProfileDNSAndPreservesHTTPHost(t *testing.T) {
+	tester := &GroupURLTester{
+		link:        "http://connectivity.example/check",
+		host:        "connectivity.example",
+		destination: M.ParseSocksaddrHostPort("connectivity.example", 80),
+		timeout:     time.Second,
+	}
+	dialer := &groupURLTestDialer{
+		destination: make(chan M.Socksaddr, 1),
+		host:        make(chan string, 1),
+	}
+	ctx := service.ContextWith[adapter.DNSRouter](t.Context(), new(groupURLTestDNSRouter))
+	if _, err := tester.testOnce(ctx, new(BoxInstance), dialer); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-dialer.destination; got != M.ParseSocksaddr("192.0.2.10:80") {
+		t.Fatalf("destination = %v", got)
+	}
+	if got := <-dialer.host; got != tester.host {
+		t.Fatalf("Host = %q", got)
 	}
 }

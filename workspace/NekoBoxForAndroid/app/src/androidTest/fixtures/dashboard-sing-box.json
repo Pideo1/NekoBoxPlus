@@ -1,0 +1,12 @@
+{
+  "log": { "level": "warn" },
+  "inbounds": [
+    { "type": "socks", "tag": "remote-test", "listen": "127.0.0.1", "listen_port": 19090 }
+  ],
+  "outbounds": [ { "type": "direct", "tag": "direct" } ],
+  "route": {
+    "rules": [
+      { "ip_cidr": ["10.0.2.2/32"], "action": "route-options", "override_address": "127.0.0.1" }
+    ]
+  }
+}

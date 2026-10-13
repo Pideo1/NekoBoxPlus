@@ -204,43 +204,15 @@ class VpnService :
         var effectiveBypass: Boolean? = null
         var effectiveApplications = emptyList<String>()
         if (proxyApps || adblockSystemWideFilter || needBypassRootUid) {
-            val individual = mutableSetOf<String>()
-            val allApps by lazy {
-                packageManager
-                    .getInstalledApplications(PackageManager.GET_META_DATA)
-                    .map { it.packageName }
-                    .filter { it != packageName }
-            }
-            if (adblockSystemWideFilter) {
-                individual.addAll(allApps)
-                bypass = false
-            } else if (proxyApps) {
-                individual.addAll(
-                    DataStore.individual
-                        .lineSequence()
-                        .map { it.trim() }
-                        .filter { it.isNotBlank() },
-                )
-
-                if (!bypass) {
-                    individual.addAll(packagesFromRules)
-                    individual.addAll(adblockPackages)
-                } else {
-                    individual.removeAll(packagesFromRules.toSet())
-                    individual.removeAll(adblockPackages.toSet())
-                }
-
-                if (bypass && needBypassRootUid) {
-                    val individualNew = allApps.toMutableList()
-                    individualNew.removeAll(individual)
-                    individual.clear()
-                    individual.addAll(individualNew)
-                    bypass = false
-                }
-            } else {
-                individual.addAll(allApps)
-                bypass = false
-            }
+            val capture = AppCapturePlan.build(
+                packageName, proxyApps, bypass,
+                DataStore.individual.lineSequence().map(String::trim).filter(String::isNotBlank).toSet(),
+                packagesFromRules.toSet(), adblockPackages.toSet(), adblockSystemWideFilter,
+                needBypassRootUid,
+                packageManager.getInstalledApplications(PackageManager.GET_META_DATA).map { it.packageName }.toSet(),
+            )
+            bypass = capture.bypass == true
+            val individual = capture.packages.toMutableSet()
 
             val added = mutableListOf<String>()
 

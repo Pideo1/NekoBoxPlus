@@ -9,6 +9,7 @@ import (
 
 	"github.com/sagernet/bbolt"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/logger"
 )
@@ -21,7 +22,7 @@ func newStartedCache(t *testing.T, path string) *CacheFile {
 		Enabled: true,
 		Path:    path,
 	})
-	if err := cacheFile.Start(adapter.StartStateInitialize); err != nil {
+	if err := cacheFile.Start(adapter.StartStateInitialize, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err != nil {
 		t.Fatalf("start rw cache: %v", err)
 	}
 	return cacheFile
@@ -45,7 +46,7 @@ func TestReadOnlyLoadsMASQUEConfig(t *testing.T) {
 	}
 
 	reader := NewReadOnly(context.Background(), path)
-	if err := reader.Start(adapter.StartStateInitialize); err != nil {
+	if err := reader.Start(adapter.StartStateInitialize, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err != nil {
 		t.Fatalf("start ro cache: %v", err)
 	}
 	defer reader.Close()
@@ -124,7 +125,7 @@ func TestReadOnlyDoesNotMutateDatabase(t *testing.T) {
 
 	// The actual fix: a read-only open must not touch the file at all.
 	reader := NewReadOnly(context.Background(), mainPath)
-	if err := reader.Start(adapter.StartStateInitialize); err != nil {
+	if err := reader.Start(adapter.StartStateInitialize, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err != nil {
 		t.Fatalf("start ro cache: %v", err)
 	}
 	if saved := reader.LoadMASQUEConfig(tag); saved == nil {
@@ -144,7 +145,7 @@ func TestReadOnlyDoesNotMutateDatabase(t *testing.T) {
 
 	// The unknown bucket must still be present, proving no housekeeping ran.
 	inspect := NewReadOnly(context.Background(), mainPath)
-	if err := inspect.Start(adapter.StartStateInitialize); err != nil {
+	if err := inspect.Start(adapter.StartStateInitialize, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err != nil {
 		t.Fatalf("start ro inspect cache: %v", err)
 	}
 	var unknownSeen bool
@@ -167,7 +168,7 @@ func TestReadOnlyDoesNotMutateDatabase(t *testing.T) {
 func TestReadOnlyMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.db")
 	reader := NewReadOnly(context.Background(), path)
-	err := reader.Start(adapter.StartStateInitialize)
+	err := reader.Start(adapter.StartStateInitialize, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger()))
 	if err == nil {
 		t.Fatal("expected an error for a missing cache file")
 	}

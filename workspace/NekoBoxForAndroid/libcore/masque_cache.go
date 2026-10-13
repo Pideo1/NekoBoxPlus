@@ -8,6 +8,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/experimental/cachefile"
+	boxLog "github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/filemanager"
 )
@@ -23,15 +24,16 @@ func LoadMASQUEConfigFromCache(tag string, cacheFilePath string) (config string,
 	// Android (bbolt uses per-process POSIX locks there, so a second read-write
 	// handle in the same process does not block the box) and corrupt the
 	// freelist ("page N already freed") on profile switches.
+	scope := adapter.NewScope(ctx, boxLog.NewNOPFactory().Logger())
+	defer scope.Close()
 	cacheFile := cachefile.NewReadOnly(ctx, cacheFilePath)
-	if err = cacheFile.Start(adapter.StartStateInitialize); err != nil {
+	if err = cacheFile.Start(adapter.StartStateInitialize, scope); err != nil {
 		if os.IsNotExist(err) {
 			// No cache file yet: nothing to load, and not an error to surface.
 			return "", nil
 		}
 		return "", err
 	}
-	defer cacheFile.Close()
 	savedConfig := cacheFile.LoadMASQUEConfig(tag)
 	if savedConfig == nil {
 		return "", nil

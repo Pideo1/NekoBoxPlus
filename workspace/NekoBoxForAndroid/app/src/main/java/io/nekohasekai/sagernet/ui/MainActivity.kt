@@ -100,6 +100,7 @@ class MainActivity :
     SagerConnection.Callback,
     OnPreferenceDataStoreChangeListener {
     companion object {
+        const val ACTION_SHOW_DASHBOARD = "io.nekohasekai.sagernet.action.SHOW_DASHBOARD"
         const val ACTION_SHOW_CONNECTION_TEST = "io.nekohasekai.sagernet.action.SHOW_CONNECTION_TEST"
         private const val INITIAL_PROFILE_DRAW_TIMEOUT_MILLIS = 3_000L
         private var openSettingsOnCreate = false
@@ -134,6 +135,11 @@ class MainActivity :
     }
     private var tvDpadShortcutFocus: View? = null
     private var consumeTvSearchBackUp = false
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("selectedDrawerItem", shellState.selectedItemId)
+        super.onSaveInstanceState(outState)
+    }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (SagerNet.isTv && event.keyCode == KeyEvent.KEYCODE_BACK) {
@@ -181,11 +187,14 @@ class MainActivity :
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MessageStore.setCurrentActivity(this)
+        shellState.selectedItemId = savedInstanceState?.getInt("selectedDrawerItem", R.id.nav_configuration)
+            ?: R.id.nav_configuration
         val openSettingsOnCreate = consumeOpenSettingsOnCreate()
 
         binding = LayoutMainBinding.inflate(layoutInflater)
         binding.fab.initProgress(binding.fabProgress)
         syncProxyAppsDrawerItem()
+        refreshNavMenu(DataStore.enableClashAPI)
         // Keep the fragment host synchronously attached; Compose owns the drawer overlay.
         setContentView(binding.root)
         val drawerOverlay = DrawerOverlayComposeView(this).apply {
@@ -282,7 +291,7 @@ class MainActivity :
 
         showPendingCustomThemePreview()
 
-        if (intent?.action == Intent.ACTION_VIEW || intent?.action == ACTION_SHOW_CONNECTION_TEST) {
+        if (intent?.action == Intent.ACTION_VIEW || intent?.action == ACTION_SHOW_CONNECTION_TEST || intent?.action == ACTION_SHOW_DASHBOARD) {
             onNewIntent(intent)
         }
 
@@ -474,6 +483,11 @@ class MainActivity :
 
         if (intent.action == ACTION_SHOW_CONNECTION_TEST) {
             restoreConnectionTestDialog()
+            return
+        }
+        if (intent.action == ACTION_SHOW_DASHBOARD) {
+            setIntent(Intent(intent).setAction(null))
+            displayFragmentWithId(if (DataStore.enableClashAPI) R.id.nav_traffic else R.id.nav_dashboard)
             return
         }
         val uri = intent.data ?: return
@@ -984,8 +998,12 @@ class MainActivity :
                 displayFragment(SettingsFragment())
             }
 
-            R.id.nav_traffic -> {
-                displayFragment(WebviewFragment())
+            R.id.nav_traffic, R.id.nav_dashboard -> {
+                if (DataStore.enableClashAPI) {
+                    displayFragment(WebviewFragment())
+                } else {
+                    displayFragment(DashboardFragment())
+                }
             }
 
             R.id.nav_tools -> {
@@ -1005,7 +1023,10 @@ class MainActivity :
                 return false
             }
         }
-        shellState.selectedItemId = id
+        shellState.selectedItemId = when (id) {
+            R.id.nav_traffic, R.id.nav_dashboard -> if (DataStore.enableClashAPI) R.id.nav_traffic else R.id.nav_dashboard
+            else -> id
+        }
         return true
     }
 
@@ -1171,6 +1192,15 @@ class MainActivity :
         key: String,
     ) {
         when (key) {
+            Key.ENABLE_CLASH_API -> {
+                refreshNavMenu(DataStore.enableClashAPI)
+                (supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ConfigurationFragment)?.refreshDashboardToolbar()
+                val dashboard = supportFragmentManager.findFragmentById(R.id.fragment_holder)
+                if ((!DataStore.enableClashAPI && dashboard is WebviewFragment) ||
+                    (DataStore.enableClashAPI && dashboard is DashboardFragment)) {
+                    displayFragmentWithId(if (DataStore.enableClashAPI) R.id.nav_traffic else R.id.nav_dashboard)
+                }
+            }
             Key.SERVICE_MODE -> {
                 onBinderDied()
             }

@@ -19,6 +19,7 @@ internal class ConnectionRecoveryQueue(
     private val recover: (Boolean, Boolean, ServiceRestartCause) -> Unit,
     private val log: (String) -> Unit = { Logs.d(it) },
     private val elapsedRealtime: () -> Long = SystemClock::elapsedRealtime,
+    private val disableCoreSleep: Boolean = false,
 ) : AutoCloseable {
     private sealed interface Event {
         data class Idle(val idle: Boolean, val reconnect: Boolean, val reset: Boolean) : Event
@@ -53,7 +54,7 @@ internal class ConnectionRecoveryQueue(
                             val wasIdle = idle
                             idle = event.idle
                             if (idle) wakeRecoveryRequested = false
-                            if (wasIdle != idle && ready) pause(idle)
+                            if (wasIdle != idle && ready) pause(idle && !disableCoreSleep)
                             if (wasIdle && !idle && !wakeRecoveryRequested) {
                                 pending.request(event.reconnect, event.reset, ServiceRestartCause.WakeReconnect)
                                 wakeRecoveryRequested = event.reconnect || event.reset
@@ -84,7 +85,7 @@ internal class ConnectionRecoveryQueue(
                         is Event.Request -> pending.request(event.reconnect, event.reset, event.cause)
                         Event.Ready -> {
                             ready = true
-                            pause(idle)
+                            pause(idle && !disableCoreSleep)
                         }
                         Event.Flush -> {
                             flushJob = null

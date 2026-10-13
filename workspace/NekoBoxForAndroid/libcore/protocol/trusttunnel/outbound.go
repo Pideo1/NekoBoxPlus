@@ -141,7 +141,10 @@ func trustedRootCertificates(certificates []string, certificatePath string) (str
 	return string(content), nil
 }
 
-func (h *Outbound) Start(stage adapter.StartStage) error {
+func (h *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(h.Close)
+	}
 	if stage != adapter.StartStateStart {
 		return nil
 	}

@@ -54,6 +54,7 @@ class RouteSettingsActivity : ThemedActivity(),
         const val EXTRA_ROUTE_ID = "id"
         const val EXTRA_PACKAGE_NAME = "pkg"
         const val EXTRA_ROUTE_TYPE = "type"
+        const val EXTRA_DASHBOARD_ROUTE_DRAFT = "dashboardRouteDraft"
         private const val WIFI_LOCATION_PERMISSION_REQUEST_CODE = 1001
 
         private const val ROUTE_PROTOCOL_SELECTOR = "routeProtocolSelector"
@@ -72,6 +73,20 @@ class RouteSettingsActivity : ThemedActivity(),
     fun init(packageName: String?) {
         RuleEntity().apply {
             type = RuleType.fromValue(intent.getStringExtra(EXTRA_ROUTE_TYPE)).value
+            intent.getStringExtra(EXTRA_DASHBOARD_ROUTE_DRAFT)?.let { encoded ->
+                val draft = org.json.JSONObject(encoded)
+                domains = draft.optString("domain").takeIf { it.isNotBlank() }?.let { "full:$it" }.orEmpty()
+                val destination = io.nekohasekai.sagernet.ui.dashboard.splitEndpoint(draft.optString("destination"))
+                ip = destination.first
+                port = destination.second
+                val sourceEndpoint = io.nekohasekai.sagernet.ui.dashboard.splitEndpoint(draft.optString("source"))
+                source = sourceEndpoint.first
+                sourcePort = sourceEndpoint.second
+                network = draft.optString("network")
+                protocol = draft.optString("protocol")
+                val packageArray = draft.optJSONArray("packages")
+                packages = if (packageArray == null) emptySet() else (0 until packageArray.length()).map { packageArray.getString(it) }.toSet()
+            }
             if (!packageName.isNullOrBlank()) {
                 packages = setOf(packageName)
                 name = app.getString(R.string.route_for, PackageCache.loadLabel(packageName))

@@ -29,6 +29,8 @@ func RegisterOutbound(registry *outbound.Registry) {
 var (
 	_ adapter.Outbound                = (*Outbound)(nil)
 	_ adapter.InterfaceUpdateListener = (*Outbound)(nil)
+	_ adapter.IdleConnectionKeeper    = (*Outbound)(nil)
+	_ adapter.OutboundWithMultiplex   = (*Outbound)(nil)
 )
 
 type Outbound struct {
@@ -38,7 +40,6 @@ type Outbound struct {
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.HysteriaOutboundOptions) (adapter.Outbound, error) {
-	options.UDPFragmentDefault = true
 	if options.TLS == nil || !options.TLS.Enabled {
 		return nil, C.ErrTLSRequired
 	}
@@ -118,6 +119,24 @@ func (h *Outbound) InterfaceUpdated(ctx context.Context) {
 	h.client.CloseWithError(E.New("network changed"))
 }
 
-func (h *Outbound) Close() error {
-	return h.client.CloseWithError(os.ErrClosed)
+func (h *Outbound) MultiplexEnabled() bool {
+	return true
+}
+
+func (h *Outbound) SetKeepIdleConnections(keep bool) {
+	h.client.SetKeepIdleConnections(keep)
+}
+
+func (h *Outbound) CloseIdleConnections() {
+	h.client.CloseIdleConnections()
+}
+
+func (h *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage != adapter.StartStateInitialize {
+		return nil
+	}
+	scope.Add(func() error {
+		return h.client.CloseWithError(os.ErrClosed)
+	})
+	return nil
 }

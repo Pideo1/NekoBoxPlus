@@ -23,8 +23,8 @@ type resetProbe struct {
 
 type explicitResetKey struct{}
 
-func (*resetProbe) Start(adapter.StartStage) error { return nil }
-func (*resetProbe) Close() error                   { return nil }
+func (*resetProbe) Start(adapter.StartStage, *adapter.Scope) error { return nil }
+func (*resetProbe) Close() error                                   { return nil }
 
 func (p *resetProbe) InterfaceUpdated(ctx context.Context) {
 	if ctx.Value(explicitResetKey{}) != nil {

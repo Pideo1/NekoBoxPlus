@@ -111,14 +111,14 @@ func newDNSEndpoint(t *testing.T, ctx context.Context, options option.AwgEndpoin
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = endpoint.Close() })
+	t.Cleanup(func() { _ = endpoint.(*Endpoint).Close() })
 	return endpoint.(*Endpoint)
 }
 
 func startDNSEndpoint(t *testing.T, endpoint *Endpoint) {
 	t.Helper()
 	for _, stage := range []adapter.StartStage{adapter.StartStateInitialize, adapter.StartStateStart, adapter.StartStatePostStart, adapter.StartStateStarted} {
-		if err := endpoint.Start(stage); err != nil {
+		if err := endpoint.Start(stage, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -166,7 +166,7 @@ func TestDomainEndpointUsesConfiguredDNSAfterStartup(t *testing.T) {
 				options.DomainResolver.Timeout = badoption.Duration(2 * time.Second)
 				endpoint := newDNSEndpoint(t, ctx, options)
 				for _, stage := range []adapter.StartStage{adapter.StartStateInitialize, adapter.StartStateStart} {
-					if err := endpoint.Start(stage); err != nil {
+					if err := endpoint.Start(stage, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -174,7 +174,7 @@ func TestDomainEndpointUsesConfiguredDNSAfterStartup(t *testing.T) {
 					t.Fatal("domain peer initialized before DNS was ready")
 				}
 				ready = true
-				if err := endpoint.Start(adapter.StartStatePostStart); err != nil {
+				if err := endpoint.Start(adapter.StartStatePostStart, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err != nil {
 					t.Fatal(err)
 				}
 				if endpoint.device == nil || calls != 1 {
@@ -221,7 +221,7 @@ func TestDomainEndpointResolutionFailures(t *testing.T) {
 			if test.cancel {
 				cancel()
 			}
-			err := endpoint.Start(adapter.StartStatePostStart)
+			err := endpoint.Start(adapter.StartStatePostStart, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger()))
 			if err == nil || test.err != nil && !errors.Is(err, test.err) {
 				t.Fatalf("unexpected startup error: %v", err)
 			}
@@ -242,7 +242,7 @@ func TestDomainEndpointCloseBeforeStart(t *testing.T) {
 	if err := endpoint.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := endpoint.Start(adapter.StartStatePostStart); err == nil {
+	if err := endpoint.Start(adapter.StartStatePostStart, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err == nil {
 		t.Fatal("closed endpoint restarted")
 	}
 }
@@ -256,7 +256,7 @@ func TestDomainEndpointDoesNotPublishDeviceAfterStartupFailure(t *testing.T) {
 	// Decodes successfully but is rejected when the device applies its IPC config.
 	options.PrivateKey = base64.StdEncoding.EncodeToString([]byte{1})
 	endpoint := newDNSEndpoint(t, ctx, options)
-	if err := endpoint.Start(adapter.StartStatePostStart); err == nil || !strings.Contains(err.Error(), "set ipc config") {
+	if err := endpoint.Start(adapter.StartStatePostStart, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err == nil || !strings.Contains(err.Error(), "set ipc config") {
 		t.Fatalf("expected device startup failure, got %v", err)
 	}
 	if endpoint.device != nil {
@@ -293,7 +293,7 @@ func TestDomainEndpointHonorsDNSCacheAcrossInstances(t *testing.T) {
 				clientOptions := dns.ClientOptions{Context: t.Context(), Logger: log.NewNOPFactory().Logger(), DisableCache: test.disabled}
 				if test.persistent {
 					store = cachefile.New(t.Context(), log.NewNOPFactory().Logger(), option.CacheFileOptions{Enabled: true, Path: path, StoreDNS: true})
-					if err := store.Start(adapter.StartStateInitialize); err != nil {
+					if err := store.Start(adapter.StartStateInitialize, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err != nil {
 						t.Fatal(err)
 					}
 					clientOptions.DNSCache = func() adapter.DNSCacheStore { return store }

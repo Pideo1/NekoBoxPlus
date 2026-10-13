@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
@@ -27,9 +28,10 @@ type Client struct {
 	maxConnections int
 	maxStreams     int
 
-	access  sync.Mutex
-	workers []*worker
-	closed  bool
+	access    sync.Mutex
+	workers   []*worker
+	closed    bool
+	closeIdle bool
 }
 
 // NewClientWithOptions constructs a mux.cool client from the sing-box multiplex
@@ -81,11 +83,16 @@ func (c *Client) ListenPacket(ctx context.Context, destination M.Socksaddr) (net
 
 func (c *Client) openSessionWithRetry(ctx context.Context, transport TargetNetwork, destination M.Socksaddr) (*session, error) {
 	for attempts := 0; ; attempts++ {
-		w, isNew, err := c.pickWorker(ctx)
+		// Reserve the session while holding access so idle cleanup cannot
+		// close a worker between choosing it and opening the stream.
+		c.access.Lock()
+		w, isNew, err := c.pickWorkerLocked(ctx)
 		if err != nil {
+			c.access.Unlock()
 			return nil, err
 		}
 		s, err := w.openSession(ctx, transport, destination)
+		c.access.Unlock()
 		if err != nil {
 			// If this was a freshly dialled worker that failed immediately, give
 			// up; otherwise retry against another worker.
@@ -98,12 +105,10 @@ func (c *Client) openSessionWithRetry(ctx context.Context, transport TargetNetwo
 	}
 }
 
-// pickWorker returns a worker with free capacity, dialling a new one when
+// pickWorkerLocked returns a worker with free capacity, dialling a new one when
 // necessary (and permitted by maxConnections). The bool result is true when the
 // returned worker was just created.
-func (c *Client) pickWorker(ctx context.Context) (*worker, bool, error) {
-	c.access.Lock()
-	defer c.access.Unlock()
+func (c *Client) pickWorkerLocked(ctx context.Context) (*worker, bool, error) {
 	if c.closed {
 		return nil, false, errClosed
 	}
@@ -141,7 +146,7 @@ func (c *Client) newWorkerLocked(ctx context.Context) (*worker, error) {
 	if err != nil {
 		return nil, E.Cause(err, "mux.cool: dial underlying connection")
 	}
-	w := newWorker(conn, c.logger)
+	w := newWorker(conn, c.logger, c.closeIdleConnectionsIfNeeded)
 	c.workers = append(c.workers, w)
 	return w, nil
 }
@@ -178,17 +183,21 @@ type worker struct {
 
 	writeMu sync.Mutex
 
-	closeOnce sync.Once
-	done      chan struct{}
-	doneErr   error
+	closeOnce   sync.Once
+	done        chan struct{}
+	doneErr     error
+	closeIfIdle func()
 }
 
-func newWorker(conn net.Conn, logger logger.Logger) *worker {
+func newWorker(conn net.Conn, logger logger.Logger, closeIfIdle ...func()) *worker {
 	w := &worker{
 		conn:           conn,
 		logger:         logger,
 		sessionManager: newSessionManager(),
 		done:           make(chan struct{}),
+	}
+	if len(closeIfIdle) > 0 {
+		w.closeIfIdle = closeIfIdle[0]
 	}
 	go w.readLoop()
 	return w
@@ -227,6 +236,7 @@ func (w *worker) openSession(ctx context.Context, transport TargetNetwork, dest 
 		return nil, errClosed
 	}
 	s := newSession(0, w, transport, dest)
+	s.keepSession = adapter.KeepSessionFromContext(ctx)
 	id, ok := w.sessionManager.allocate(s)
 	if !ok {
 		return nil, E.New("mux.cool: no session IDs available")
@@ -273,6 +283,9 @@ func (w *worker) readLoop() {
 			if s, ok := w.sessionManager.get(meta.SessionID); ok {
 				s.deliverEOF()
 				w.sessionManager.remove(meta.SessionID)
+				if !s.keepSession && w.closeIfIdle != nil {
+					w.closeIfIdle()
+				}
 			}
 			if optionHas(meta.Option, OptionData) {
 				if err := discardData(w.conn); err != nil {
@@ -473,3 +486,38 @@ const (
 var (
 	_ N.Dialer = (*Client)(nil)
 )
+
+func (c *Client) SetKeepIdleConnections(keep bool) {
+	c.access.Lock()
+	c.closeIdle = !keep
+	c.access.Unlock()
+	if !keep {
+		c.CloseIdleConnections()
+	}
+}
+
+func (c *Client) closeIdleConnectionsIfNeeded() {
+	c.access.Lock()
+	defer c.access.Unlock()
+	if c.closeIdle {
+		c.closeIdleConnectionsLocked()
+	}
+}
+
+func (c *Client) CloseIdleConnections() {
+	c.access.Lock()
+	defer c.access.Unlock()
+	c.closeIdleConnectionsLocked()
+}
+
+func (c *Client) closeIdleConnectionsLocked() {
+	active := c.workers[:0]
+	for _, w := range c.workers {
+		if w.sessionManager.size() == 0 {
+			w.close()
+		} else {
+			active = append(active, w)
+		}
+	}
+	c.workers = active
+}

@@ -42,9 +42,23 @@ internal data class XraySubscriptionBodyHeaders(
     val homepage: String? = null,
 )
 
+@OptIn(ExperimentalEncodingApi::class)
 internal fun parseXraySubscriptionBodyHeaders(text: String): XraySubscriptionBodyHeaders {
+    // URI subscriptions may encode the entire body, including its metadata comments.
+    val trimmed = text.removePrefix("\uFEFF").trimStart()
+    val body = if (trimmed.startsWith('#')) {
+        trimmed
+    } else {
+        val encoded = trimmed.filterNot(Char::isWhitespace)
+        val padded = encoded.padEnd(encoded.length + (4 - encoded.length % 4) % 4, '=')
+        runCatching { Base64.Default.decode(padded) }
+            .recoverCatching { Base64.UrlSafe.decode(padded) }
+            .getOrNull()
+            ?.toString(Charsets.UTF_8)
+            ?: trimmed
+    }
     val values = linkedMapOf<String, String>()
-    for ((index, rawLine) in text.lineSequence().withIndex()) {
+    for ((index, rawLine) in body.lineSequence().withIndex()) {
         val line = rawLine.let { if (index == 0) it.removePrefix("\uFEFF") else it }.trim()
         if (line.isEmpty()) continue
         if (!line.startsWith('#')) break

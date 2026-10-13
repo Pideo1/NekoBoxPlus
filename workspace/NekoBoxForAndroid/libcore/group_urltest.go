@@ -21,6 +21,7 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/ntp"
+	"github.com/sagernet/sing/service"
 )
 
 const (
@@ -129,7 +130,7 @@ func (t *GroupURLTester) testProfile(ctx context.Context, config, tag string) (l
 	if err != nil {
 		return -1, err
 	}
-	latency, err = t.testWithRetry(ctx, instance, detour)
+	latency, err = t.testWithRetry(instance.ctx, instance, detour)
 	if errors.Is(err, context.DeadlineExceeded) {
 		closeSynchronously = false
 		instance.closeURLTestAsync()
@@ -184,15 +185,31 @@ func (t *GroupURLTester) testWithRetry(ctx context.Context, instance *BoxInstanc
 func (t *GroupURLTester) testOnce(ctx context.Context, instance *BoxInstance, detour N.Dialer) (int32, error) {
 	connections := newURLTestConnectionSet()
 	defer connections.closeAllSafely()
+	// Match the speed test path: use the profile's DNS router before dialing.
+	// Some protocols accept domains but cannot resolve them reliably remotely.
+	var addresses []netip.Addr
+	if dnsRouter := service.FromContext[adapter.DNSRouter](ctx); dnsRouter != nil {
+		var err error
+		addresses, err = lookupURLTestHost(ctx, t.link, t.hardened,
+			func(ctx context.Context, host string) ([]netip.Addr, error) {
+				return dnsRouter.Lookup(ctx, host, adapter.DNSQueryOptions{DisableCache: t.hardened})
+			}, localURLTestLookup(t.localTransport))
+		if err != nil {
+			return -1, fmt.Errorf("resolve group URLTest host: %w", err)
+		}
+	}
+	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		return dialURLTestDestination(ctx, network, M.ParseSocksaddr(address), detour.DialContext, t.localTransport)
+	}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			conn, err := dialURLTestDestination(
-				ctx,
-				network,
-				t.destination,
-				detour.DialContext,
-				t.localTransport,
-			)
+			var conn net.Conn
+			var err error
+			if len(addresses) > 0 {
+				conn, err = dialResolvedURLTestAddresses(ctx, network, t.destination.String(), addresses, dial)
+			} else {
+				conn, err = dial(ctx, network, t.destination.String())
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -331,9 +348,11 @@ func runHardenedTCPPing(
 ) (*PingResult, error) {
 	var lastErr error
 	for {
-		for _, resolvedAddress := range addresses {
+		for index, resolvedAddress := range addresses {
 			dialAddress := net.JoinHostPort(resolvedAddress.String(), port)
-			latency, err := speedtest.TCPPing(ctx, dial, dialAddress)
+			attemptCtx, cancel := probeAddressContext(ctx, len(addresses)-index)
+			latency, err := speedtest.TCPPing(attemptCtx, dial, dialAddress)
+			cancel()
 			if err == nil {
 				return &PingResult{latency: latency, address: resolvedAddress.String()}, nil
 			}

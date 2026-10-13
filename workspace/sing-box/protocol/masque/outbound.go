@@ -6,6 +6,7 @@ import (
 	"github.com/goccy/go-json"
 	"net"
 	"net/netip"
+	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -45,6 +46,8 @@ var _ adapter.FlowOutbound = (*Outbound)(nil)
 type Outbound struct {
 	outbound.Adapter
 	ctx          context.Context
+	cancel       context.CancelFunc
+	started      atomic.Bool
 	dnsRouter    adapter.DNSRouter
 	logger       logger.ContextLogger
 	options      option.MASQUEOutboundOptions
@@ -60,9 +63,11 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithCancel(ctx)
 	outbound := &Outbound{
 		Adapter:   outbound.NewAdapterWithDialerOptions(C.TypeMASQUE, tag, []string{N.NetworkTCP, N.NetworkUDP, N.NetworkICMP}, options.DialerOptions),
 		ctx:       ctx,
+		cancel:    cancel,
 		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
 		logger:    logger,
 		options:   options,
@@ -131,25 +136,50 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 			fail(E.New("failed to prepare TLS config: ", err))
 			return
 		}
-		h3EndpointAddr, err := appConfig.SelectEndpointFromConfig(false, options.UseIPv6, 443)
+		h3Host := appConfig.EndpointHost(false, options.UseIPv6)
+		h2Host := appConfig.EndpointHost(true, options.UseIPv6)
+		remoteIsDomain := (transport != "h2" && !M.ParseAddr(h3Host).IsValid()) ||
+			(transport != "h3" && !M.ParseAddr(h2Host).IsValid())
+		outboundDialer, err := dialer.NewWithOptions(dialer.Options{
+			Context:          ctx,
+			Options:          options.DialerOptions,
+			RemoteIsDomain:   remoteIsDomain,
+			ResolverOnDetour: true,
+		})
 		if err != nil {
-			fail(E.New("failed to select HTTP/3 endpoint: ", err))
+			fail(err)
 			return
 		}
-		h3Endpoint, ok := h3EndpointAddr.(*net.UDPAddr)
-		if !ok {
-			fail(E.New("invalid HTTP/3 endpoint type"))
-			return
+		lookupEndpoint := func(domain string) ([]netip.Addr, error) {
+			queryOptions := outboundDialer.(dialer.ResolveDialer).QueryOptions()
+			if options.Detour != "" {
+				var resolveErr error
+				queryOptions, resolveErr = dialer.PeerDomainQueryOptions(
+					service.FromContext[adapter.DNSTransportManager](ctx), tag, options.Detour, queryOptions,
+				)
+				if resolveErr != nil {
+					return nil, resolveErr
+				}
+			}
+			return outbound.dnsRouter.Lookup(ctx, domain, queryOptions)
 		}
-		h2EndpointAddr, err := appConfig.SelectEndpointFromConfig(true, options.UseIPv6, 443)
-		if err != nil {
-			fail(E.New("failed to select HTTP/2 endpoint: ", err))
-			return
+		var h3Endpoint *net.UDPAddr
+		if transport != "h2" {
+			address, err := resolveEndpointAddress(h3Host, options.UseIPv6, lookupEndpoint)
+			if err != nil {
+				fail(E.New("failed to select HTTP/3 endpoint: ", err))
+				return
+			}
+			h3Endpoint = net.UDPAddrFromAddrPort(netip.AddrPortFrom(address, 443))
 		}
-		h2Endpoint, ok := h2EndpointAddr.(*net.TCPAddr)
-		if !ok {
-			fail(E.New("invalid HTTP/2 endpoint type"))
-			return
+		var h2Endpoint *net.TCPAddr
+		if transport != "h3" {
+			address, err := resolveEndpointAddress(h2Host, options.UseIPv6, lookupEndpoint)
+			if err != nil {
+				fail(E.New("failed to select HTTP/2 endpoint: ", err))
+				return
+			}
+			h2Endpoint = net.TCPAddrFromAddrPort(netip.AddrPortFrom(address, 443))
 		}
 		var udpTimeout time.Duration
 		if options.UDPTimeout != 0 {
@@ -162,16 +192,6 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 			udpKeepalivePeriod = time.Duration(options.UDPKeepalivePeriod)
 		} else {
 			udpKeepalivePeriod = 30 * time.Second
-		}
-		outboundDialer, err := dialer.NewWithOptions(dialer.Options{
-			Context:          ctx,
-			Options:          options.DialerOptions,
-			RemoteIsDomain:   false,
-			ResolverOnDetour: true,
-		})
-		if err != nil {
-			fail(err)
-			return
 		}
 		addresses, err := parseMASQUEAddresses(appConfig)
 		if err != nil {
@@ -217,6 +237,32 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		}
 	}
 	return outbound, nil
+}
+
+// resolveEndpointAddress keeps endpoint DNS on the configured resolver and selects
+// only addresses matching the configured endpoint family.
+func resolveEndpointAddress(host string, useIPv6 bool, lookup func(string) ([]netip.Addr, error)) (netip.Addr, error) {
+	if address := M.ParseAddr(host); address.IsValid() {
+		return address, nil
+	}
+	if host == "" {
+		return netip.Addr{}, E.New("missing endpoint hostname or IP address")
+	}
+	addresses, err := lookup(host)
+	if err != nil {
+		return netip.Addr{}, E.Cause(err, "resolve endpoint ", host)
+	}
+	for _, address := range addresses {
+		address = address.Unmap()
+		if address.IsValid() && address.Is6() == useIPv6 {
+			return address, nil
+		}
+	}
+	family := "IPv4"
+	if useIPv6 {
+		family = "IPv6"
+	}
+	return netip.Addr{}, E.New("no ", family, " address for endpoint ", host)
 }
 
 func parseMASQUEAddresses(config *option.MASQUEConfig) ([]netip.Prefix, error) {
@@ -272,17 +318,32 @@ func resolveTransportOptions(options option.MASQUEOutboundOptions) (string, uint
 	return transport, mtu, fallbackTimeout, nil
 }
 
-func (w *Outbound) Start(stage adapter.StartStage) error {
+func (w *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(w.Close)
+	}
 	if stage != adapter.StartStatePostStart {
 		return nil
 	}
-	go w.startHandler()
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+	if w.started.CompareAndSwap(false, true) {
+		go w.startHandler()
+	}
 	return nil
 }
 
 func (w *Outbound) Close() error {
-	if err := w.isTunnelInitialized(w.ctx); err != nil {
-		return err
+	w.cancel()
+	if !w.started.Load() {
+		return nil
+	}
+	// Wait for the canceled initializer to finish before checking the tunnel;
+	// it may have allocated resources immediately before shutdown.
+	<-w.await
+	if w.tunnel == nil {
+		return nil
 	}
 	return w.tunnel.Close()
 }
@@ -445,3 +506,5 @@ func (w *Outbound) createConfig() (*option.MASQUEConfig, error) {
 		IPv6:           updatedProfile.Config.Interface.Addresses.V6,
 	}, nil
 }
+
+var _ adapter.Lifecycle = (*Outbound)(nil)

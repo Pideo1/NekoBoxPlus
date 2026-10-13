@@ -104,7 +104,10 @@ func InitCore(process, cachePath, internalAssets, externalAssets string,
 	gLocalDNSTransport = newPlatformTransport(if3, "", option.LocalDNSServerOptions{})
 	protect.SetProtector(func(fd int) error {
 		if !isBgProcess {
-			return sendFdToProtect(fd, protectPath)
+			return intfBox.AutoDetectInterfaceControl(int32(fd))
+		}
+		if currentTProxyClient() != nil {
+			return TProxyProtect(int32(fd))
 		}
 		return intfBox.AutoDetectInterfaceControl(int32(fd))
 	})
@@ -181,6 +184,9 @@ func sendFdToProtect(fd int, path string) (err error) {
 	}
 	if n != 1 {
 		return fmt.Errorf("socket closed unexpectedly")
+	}
+	if dummy[0] != 1 {
+		return fmt.Errorf("socket protection was rejected")
 	}
 	return nil
 }

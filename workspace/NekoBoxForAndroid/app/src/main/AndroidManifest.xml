@@ -17,6 +17,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -704,6 +705,13 @@
             android:exported="false"
             android:launchMode="singleTask"
             android:parentActivityName="io.nekohasekai.sagernet.ui.MainActivity" />
+        <activity android:name="io.nekohasekai.sagernet.ui.DashboardBrowserAuthActivity" android:exported="false" />
+        <activity
+            android:name="io.nekohasekai.sagernet.ui.NetworkInterfacesActivity"
+            android:configChanges="uiMode"
+            android:exported="false"
+            android:label="@string/network_interfaces_title"
+            android:parentActivityName="io.nekohasekai.sagernet.ui.MainActivity" />
 
         <activity
             android:name="io.nekohasekai.sagernet.ui.SwitchActivity"
@@ -723,6 +731,17 @@
             android:exported="false"
             android:label="@string/git_backup_settings"
             android:theme="@style/Theme.SagerNet" />
+
+        <service
+            android:name="io.nekohasekai.sagernet.bg.TProxyService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse|location"
+            android:process=":bg"
+            tools:ignore="ForegroundServicePermission">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started root transparent proxy for routing device traffic until the user disconnects" />
+        </service>
 
         <service
             android:name="io.nekohasekai.sagernet.bg.ProxyService"

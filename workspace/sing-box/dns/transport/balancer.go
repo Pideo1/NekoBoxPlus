@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"io"
 	"os"
 	"slices"
 	"sync"
@@ -109,7 +108,7 @@ func NewBalancer(ctx context.Context, logger log.ContextLogger, tag string, opti
 	}, nil
 }
 
-func (t *BalancerTransport) Start(stage adapter.StartStage) error {
+func (t *BalancerTransport) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	t.access.Lock()
 	if t.closed {
 		t.access.Unlock()
@@ -120,13 +119,16 @@ func (t *BalancerTransport) Start(stage adapter.StartStage) error {
 		return nil
 	}
 	t.started[stage] = true
+	if stage == adapter.StartStateInitialize {
+		scope.Add(t.Close)
+	}
 	children := slices.Clone(t.children)
 	t.access.Unlock()
 	if stage == adapter.StartStateStart {
-		return t.startChildren(children)
+		return t.startChildren(scope, children)
 	}
 	for _, child := range children {
-		err := adapter.LegacyStart(child.transport, stage)
+		err := scope.Start("dns/"+child.transport.Type()+"["+child.tag+"]", child.transport, stage)
 		if err != nil {
 			return E.Cause(err, stage, " dns/", child.transport.Type(), "[", child.tag, "]")
 		}
@@ -134,7 +136,7 @@ func (t *BalancerTransport) Start(stage adapter.StartStage) error {
 	return nil
 }
 
-func (t *BalancerTransport) startChildren(children []*balancerChild) error {
+func (t *BalancerTransport) startChildren(scope *adapter.Scope, children []*balancerChild) error {
 	started := make(map[string]bool, len(children)*2)
 	for {
 		var canContinue bool
@@ -153,7 +155,7 @@ func (t *BalancerTransport) startChildren(children []*balancerChild) error {
 			started[child.tag] = true
 			started[child.transport.Tag()] = true
 			canContinue = true
-			err := adapter.LegacyStart(child.transport, adapter.StartStateStart)
+			err := scope.Start("dns/"+child.transport.Type()+"["+child.tag+"]", child.transport, adapter.StartStateStart)
 			if err != nil {
 				return E.Cause(err, "start dns/", child.transport.Type(), "[", child.tag, "]")
 			}
@@ -190,17 +192,8 @@ func (t *BalancerTransport) Close() error {
 		return nil
 	}
 	t.closed = true
-	children := slices.Clone(t.children)
 	t.access.Unlock()
-	var err error
-	for _, child := range children {
-		if closer, ok := child.transport.(io.Closer); ok {
-			err = E.Append(err, closer.Close(), func(err error) error {
-				return E.Cause(err, "close dns/", child.transport.Type(), "[", child.tag, "]")
-			})
-		}
-	}
-	return err
+	return nil
 }
 
 func (t *BalancerTransport) Reset() {
@@ -405,7 +398,7 @@ func (m *balancerLocalManager) set(tag string, hiddenTag string, transport adapt
 	m.transportByTag[hiddenTag] = transport
 }
 
-func (m *balancerLocalManager) Start(stage adapter.StartStage) error {
+func (m *balancerLocalManager) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	return nil
 }
 
@@ -496,20 +489,12 @@ func (t *balancerPlaceholderTransport) get() (adapter.DNSTransport, error) {
 	return transport, nil
 }
 
-func (t *balancerPlaceholderTransport) Start(stage adapter.StartStage) error {
+func (t *balancerPlaceholderTransport) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	transport, err := t.get()
 	if err != nil {
 		return err
 	}
-	return adapter.LegacyStart(transport, stage)
-}
-
-func (t *balancerPlaceholderTransport) Close() error {
-	transport, err := t.get()
-	if err != nil {
-		return err
-	}
-	return transport.Close()
+	return transport.Start(stage, scope)
 }
 
 func (t *balancerPlaceholderTransport) Type() string {
@@ -555,4 +540,17 @@ func (t *balancerPlaceholderTransport) ExchangeAsync(ctx context.Context, messag
 		return
 	}
 	transport.ExchangeAsync(ctx, message, callback)
+}
+
+func (t *BalancerTransport) References() []string {
+	t.access.Lock()
+	children := slices.Clone(t.children)
+	t.access.Unlock()
+	var references []string
+	for _, child := range children {
+		if referenced, ok := child.transport.(interface{ References() []string }); ok {
+			references = append(references, referenced.References()...)
+		}
+	}
+	return references
 }

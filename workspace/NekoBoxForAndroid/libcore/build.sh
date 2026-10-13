@@ -53,6 +53,10 @@ build_adblock_assets() {
 
 build_adblock_assets
 
+# The privileged broker is a PIE executable packaged/extracted as a native
+# library, so modern Android's writable-directory execution restrictions apply.
+bash ../buildScript/lib/tproxy.sh || exit 1
+
 # Resolve bundled-module versions from their sibling git repos and inject them
 # via linker flags. Sibling repos live two levels up from libcore/ (the same
 # relative path under both the local and the Docker build layouts).
@@ -81,7 +85,7 @@ VERSION_MASTERDNSVPN="v2026.06.13.234407-7de2476"
 VERSION_ADBLOCK_RUST="$(resolve_version ../../adblock-rust)"
 VERSION_ADBLOCK_RESOURCES="$(resolve_version ../../adblock-resources)"
 VERSION_UBLOCK="$(resolve_version ../../uBlock)"
-VERSION_SING_BOX="1.14.0-0b8995879"
+VERSION_SING_BOX="1.14.3-7054cac51"
 
 VERSION_LDFLAGS=""
 append_version_ldflag() {

@@ -31,6 +31,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.AppIconManager
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.getColorAttr
@@ -159,12 +160,15 @@ internal fun GlobalSettingsGroupScreen(
                     val entries = if (item.entries == 0) emptyList() else stringArrayResource(item.entries).toList()
                     val values = if (item.values == 0) emptyList() else stringArrayResource(item.values).toList()
                     val selected = values.indexOf(value).coerceAtLeast(0)
-                    val summary = if (entries.isEmpty()) value.ifBlank { notSet }
+                    val selectedSummary = if (entries.isEmpty()) value.ifBlank { notSet }
                     else entries.getOrElse(selected) { value.ifBlank { notSet } }
+                    val summary = if (item.key == Key.SERVICE_MODE && value == Key.MODE_TPROXY) {
+                        selectedSummary + "\n" + stringResource(R.string.tproxy_settings_summary)
+                    } else selectedSummary
                     val title = stringResource(item.title)
                     ProfileActionRow(item.icon, item.title,
                         item.fixedSummary.takeIf { it != 0 }?.let { stringResource(it) } ?: summary,
-                        enabled(item), dynamicSummary = item.fixedSummary == 0) {
+                        enabled(item), dynamicSummary = item.fixedSummary == 0 && item.key != Key.SERVICE_MODE) {
                         if (entries.isEmpty()) {
                             onAction(item.key)
                         } else context.showComposeSingleChoiceDialog(
@@ -368,6 +372,7 @@ private val GLOBAL_SETTINGS: Map<String, List<GlobalSettingItem>> = mapOf(
     "connection" to listOf(
         sw("isAutoConnect", R.drawable.ic_communication_phonelink_ring, R.string.auto_connect, R.string.auto_connect_summary),
         list("serviceMode", R.drawable.ic_device_developer_mode, R.string.service_mode, R.array.service_modes, R.array.service_mode_values),
+        sw(Key.TPROXY_TETHERING, R.drawable.ic_baseline_nat_24, R.string.tproxy_tethering, R.string.tproxy_tethering_summary),
         list("tunImplementation", R.drawable.ic_baseline_flip_camera_android_24, R.string.tun_implementation, R.array.tun_implementation, R.array.int_array_3),
         text("mtu", R.drawable.baseline_public_24, R.string.mtu),
         list("udpNatMapping", R.drawable.ic_baseline_call_split_24, R.string.udp_nat_mapping, R.array.udp_nat_behavior_entries, R.array.udp_nat_behavior_values, R.string.udp_nat_mapping_summary),
@@ -390,6 +395,7 @@ private val GLOBAL_SETTINGS: Map<String, List<GlobalSettingItem>> = mapOf(
         sw("wakeResetConnections", R.drawable.ic_baseline_flip_camera_android_24, R.string.wake_reset_connections),
     ),
     "core" to listOf(
+        sw(Key.DISABLE_CORE_SLEEP, R.drawable.ic_baseline_wb_sunny_24, R.string.disable_core_sleep, R.string.disable_core_sleep_summary),
         sw("connectionGuard", R.drawable.ic_baseline_security_24, R.string.connection_guard, R.string.connection_guard_summary),
         sw("overloadWatchdog", R.drawable.ic_baseline_bug_report_24, R.string.overload_watchdog, R.string.overload_watchdog_summary),
         text("memoryLimit", R.drawable.ic_baseline_compress_24, R.string.memory_limit, R.string.memory_limit_summary),

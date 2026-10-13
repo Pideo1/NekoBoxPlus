@@ -22,31 +22,39 @@ import io.nekohasekai.sagernet.SubscriptionFilterMode
 import io.nekohasekai.sagernet.database.*
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.group.GroupUpdater
-import io.nekohasekai.sagernet.group.defaultSpoofUserAgent
+import io.nekohasekai.sagernet.group.SubscriptionDeviceProfiles
+import io.nekohasekai.sagernet.group.SubscriptionDeviceSettings
+import io.nekohasekai.sagernet.group.decodeSubscriptionDeviceHeaders
+import io.nekohasekai.sagernet.group.generateSubscriptionDeviceHeaders
+import io.nekohasekai.sagernet.group.isSubscriptionHwidValid
 import io.nekohasekai.sagernet.group.normalizeSpoofUserAgent
+import io.nekohasekai.sagernet.group.regenerateSubscriptionDeviceSettings
 import io.nekohasekai.sagernet.group.shouldWarnAboutMissingSpoofHwid
 import io.nekohasekai.sagernet.ktx.applyDefaultValues
 import io.nekohasekai.sagernet.ktx.onDefaultDispatcher
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
-import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ktx.readableMessage
+import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.routing.ProviderRoutingSource
 import io.nekohasekai.sagernet.routing.RoutingPreviewPayloadStore
 import io.nekohasekai.sagernet.routing.SubscriptionRoutingIntervals
 import io.nekohasekai.sagernet.routing.SubscriptionRoutingRepository
-import io.nekohasekai.sagernet.ui.compose.showBlockingProgressDialog
 import io.nekohasekai.sagernet.ui.compose.GroupSettingsScreen
 import io.nekohasekai.sagernet.ui.compose.NekoComposeTheme
+import io.nekohasekai.sagernet.ui.compose.showBlockingProgressDialog
 import io.nekohasekai.sagernet.ui.compose.showComposeMessageDialog
 import io.nekohasekai.sagernet.ui.compose.showComposeSingleChoiceDialog
-import kotlinx.coroutines.launch
 import java.text.Collator
 import java.util.Locale
+import kotlinx.coroutines.launch
+import moe.matsuri.nb4a.utils.HwidGenerator
+import org.json.JSONObject
 
 @Suppress("UNCHECKED_CAST")
 class GroupSettingsActivity : ThemedActivity(),
     OnPreferenceDataStoreChangeListener {
     private var screenRevision by mutableIntStateOf(0)
+    private var editorInitialized = false
 
     fun ProxyGroup.init() {
         DataStore.groupName = name ?: ""
@@ -77,14 +85,21 @@ class GroupSettingsActivity : ThemedActivity(),
         DataStore.subscriptionForceResolve = subscription.forceResolve
         DataStore.subscriptionDeduplication = subscription.deduplication
         DataStore.subscriptionUpdateWhenConnectedOnly = subscription.updateWhenConnectedOnly
-        DataStore.subscriptionUserAgent =
+        DataStore.subscriptionUserAgent = if (subscription.deviceHeaders == null) {
             normalizeSpoofUserAgent(subscription.spoofApp ?: SpoofApp.NONE, subscription.customUserAgent)
+        } else subscription.customUserAgent
         DataStore.subscriptionAutoUpdate = subscription.autoUpdate
         DataStore.subscriptionAutoUpdateDelay = subscription.autoUpdateDelay
         DataStore.subscriptionFilterMode = subscription.filterMode
         DataStore.subscriptionFilterRegex = subscription.filterRegex
         DataStore.subscriptionHwidEnabled = subscription.hwidEnabled
         DataStore.subscriptionSpoofApp = subscription.spoofApp
+        DataStore.subscriptionHwid = subscription.hwid
+            ?: HwidGenerator.generate(this@GroupSettingsActivity, DataStore.subscriptionSpoofApp)
+        DataStore.subscriptionSpoofDevice = subscription.spoofDevice == true
+        DataStore.subscriptionDevicePreset = subscription.devicePresetId.orEmpty()
+        DataStore.subscriptionDeviceHeaders = subscription.deviceHeaders
+            ?: JSONObject(generateSubscriptionDeviceHeaders(DataStore.subscriptionSpoofApp)).toString()
         DataStore.subscriptionServerDns = subscription.serverDnsResolver ?: ""
         DataStore.subscriptionBannerLayout =
             SubscriptionBannerLayout.toValues(subscription.bannerLayout ?: SubscriptionBannerLayout.ALL)
@@ -138,6 +153,10 @@ class GroupSettingsActivity : ThemedActivity(),
                     filterRegex = DataStore.subscriptionFilterRegex
                     hwidEnabled = DataStore.subscriptionHwidEnabled
                     spoofApp = DataStore.subscriptionSpoofApp
+                    hwid = DataStore.subscriptionHwid
+                    spoofDevice = DataStore.subscriptionSpoofDevice
+                    devicePresetId = DataStore.subscriptionDevicePreset
+                    deviceHeaders = DataStore.subscriptionDeviceHeaders
                     serverDnsResolver = DataStore.subscriptionServerDns
                     bannerLayout =
                         SubscriptionBannerLayout.fromValues(DataStore.subscriptionBannerLayout)
@@ -239,6 +258,7 @@ class GroupSettingsActivity : ThemedActivity(),
     }
 
     private fun importSubscriptionRouting() {
+        if (!validateDeviceSettings()) return
         val link = DataStore.subscriptionLink.trim()
         if (link.isBlank()) {
             Toast.makeText(this, R.string.subscription_routing_not_found, Toast.LENGTH_LONG).show()
@@ -257,6 +277,10 @@ class GroupSettingsActivity : ThemedActivity(),
                     customUserAgent = DataStore.subscriptionUserAgent
                     hwidEnabled = DataStore.subscriptionHwidEnabled
                     spoofApp = DataStore.subscriptionSpoofApp
+                    hwid = DataStore.subscriptionHwid
+                    spoofDevice = DataStore.subscriptionSpoofDevice
+                    devicePresetId = DataStore.subscriptionDevicePreset
+                    deviceHeaders = DataStore.subscriptionDeviceHeaders
                 }
                 SubscriptionRoutingRepository.fetchFromSubscription(group)
             }
@@ -303,6 +327,7 @@ class GroupSettingsActivity : ThemedActivity(),
 
     companion object {
         private const val SELECT_PROFILE = 3
+        private const val STATE_EDITOR_INITIALIZED = "groupEditorInitialized"
         const val EXTRA_GROUP_ID = "id"
         const val EXTRA_FROM_CLIPBOARD = "fromClipboard"
         const val EXTRA_GROUP_SUBSCRIPTION_LINK = "subscription_link"
@@ -316,10 +341,15 @@ class GroupSettingsActivity : ThemedActivity(),
         val editingId = intent.getLongExtra(EXTRA_GROUP_ID, 0L)
         isFromClipboard = intent.getBooleanExtra(EXTRA_FROM_CLIPBOARD, false)
         val subscriptionLink = intent.getStringExtra(EXTRA_GROUP_SUBSCRIPTION_LINK)
+        // The editor cache already contains the draft during activity recreation.
+        val restoreDraft = savedInstanceState?.getBoolean(STATE_EDITOR_INITIALIZED) == true &&
+            DataStore.editingId == editingId
         DataStore.editingId = editingId
         lifecycleScope.launch {
             val loaded = onDefaultDispatcher {
-                if (editingId == 0L) {
+                if (restoreDraft) {
+                    editingId == 0L || SagerDatabase.groupDao.getById(editingId) != null
+                } else if (editingId == 0L) {
                     ProxyGroup().init()
                     if (!subscriptionLink.isNullOrEmpty()) {
                         DataStore.groupType = GroupType.SUBSCRIPTION
@@ -334,7 +364,8 @@ class GroupSettingsActivity : ThemedActivity(),
                 finish()
                 return@launch
             }
-            DataStore.dirty = false
+            if (!restoreDraft) DataStore.dirty = false
+            editorInitialized = true
             DataStore.profileCacheStore.registerChangeListener(this@GroupSettingsActivity)
             setContent {
                 NekoComposeTheme {
@@ -351,6 +382,8 @@ class GroupSettingsActivity : ThemedActivity(),
                         onImportRouting = ::importSubscriptionRouting,
                         onHwidChanged = ::warnIfSpoofNeedsHwid,
                         onSpoofAppChanged = ::applySpoofApp,
+                        onSpoofDeviceChanged = ::applySpoofDevice,
+                        onDevicePresetChanged = ::applyDevicePreset,
                         validateServerDns = ::validateServerDns,
                         validateAutoUpdateDelay = { it.toIntOrNull()?.let { delay -> delay >= 15 } == true },
                     )
@@ -360,6 +393,7 @@ class GroupSettingsActivity : ThemedActivity(),
     }
 
     suspend fun saveAndExit() {
+        if (!onMainDispatcher { validateDeviceSettings() }) return
         val editingId = DataStore.editingId
         if (editingId == 0L) {
             val draft = ProxyGroup().apply { serialize() }
@@ -560,16 +594,68 @@ class GroupSettingsActivity : ThemedActivity(),
         }
     }
 
-    private fun applySpoofApp(spoofApp: Int) {
-        DataStore.subscriptionUserAgent = defaultSpoofUserAgent(spoofApp)
-        warnIfSpoofNeedsHwid(DataStore.subscriptionHwidEnabled)
+    private fun deviceSettings() = SubscriptionDeviceSettings(
+        hwid = DataStore.subscriptionHwid,
+        userAgent = DataStore.subscriptionUserAgent,
+        spoofDevice = DataStore.subscriptionSpoofDevice,
+        devicePresetId = DataStore.subscriptionDevicePreset,
+        headers = decodeSubscriptionDeviceHeaders(DataStore.subscriptionDeviceHeaders).orEmpty(),
+    )
+
+    private fun applyDeviceSettings(settings: SubscriptionDeviceSettings) {
+        DataStore.subscriptionHwid = settings.hwid
+        DataStore.subscriptionUserAgent = settings.userAgent
+        DataStore.subscriptionSpoofDevice = settings.spoofDevice
+        DataStore.subscriptionDevicePreset = settings.devicePresetId
+        DataStore.subscriptionDeviceHeaders = JSONObject(settings.headers).toString()
         screenRevision++
+    }
+
+    private fun applySpoofApp(spoofApp: Int) {
+        applyDeviceSettings(
+            regenerateSubscriptionDeviceSettings(
+                current = deviceSettings(),
+                spoofApp = spoofApp,
+                generatedHwid = HwidGenerator.generate(this, spoofApp),
+                preserveIdentity = false,
+            ),
+        )
+        warnIfSpoofNeedsHwid(DataStore.subscriptionHwidEnabled)
+    }
+
+    private fun applySpoofDevice(enabled: Boolean) {
+        applyDevicePreset(if (enabled) null else "")
+    }
+
+    private fun applyDevicePreset(id: String?) {
+        val spoofApp = DataStore.subscriptionSpoofApp
+        val profile = when (id) {
+            null -> SubscriptionDeviceProfiles.randomForApp(spoofApp)
+            "" -> null
+            else -> SubscriptionDeviceProfiles.forApp(spoofApp).firstOrNull { it.id == id }
+                ?: return
+        }
+        applyDeviceSettings(regenerateSubscriptionDeviceSettings(deviceSettings(), spoofApp, profile))
+    }
+
+    private fun validateDeviceSettings(): Boolean {
+        if (DataStore.groupType != GroupType.SUBSCRIPTION ||
+            isSubscriptionHwidValid(DataStore.subscriptionHwidEnabled, DataStore.subscriptionHwid)) {
+            return true
+        }
+        showInvalidProfileDialog(R.string.subscription_hwid_empty)
+        return false
     }
 
     private fun validateServerDns(value: String): Boolean {
         if (isValidServerDns(value)) return true
         Toast.makeText(this, R.string.server_dns_invalid, Toast.LENGTH_LONG).show()
         return false
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_EDITOR_INITIALIZED, editorInitialized)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onDestroy() {

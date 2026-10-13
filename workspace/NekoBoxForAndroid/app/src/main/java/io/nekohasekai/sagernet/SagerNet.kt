@@ -20,6 +20,7 @@ import androidx.core.content.getSystemService
 import com.google.android.material.color.DynamicColors
 import com.google.android.material.color.DynamicColorsOptions
 import go.Seq
+import io.nekohasekai.sagernet.bg.TProxyManager
 import io.nekohasekai.sagernet.bg.CoreRecoveryService
 import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.bg.ServiceLifecyclePolicy
@@ -30,10 +31,12 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.isOss
 import io.nekohasekai.sagernet.ktx.isPreview
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.utils.*
 import kotlinx.coroutines.DEBUG_PROPERTY_NAME
 import kotlinx.coroutines.DEBUG_PROPERTY_VALUE_ON
+import kotlinx.coroutines.CancellationException
 import libcore.Libcore
 import moe.matsuri.nb4a.NativeInterface
 import moe.matsuri.nb4a.net.LocalResolverImpl
@@ -92,6 +95,9 @@ class SagerNet : Application(),
             JavaUtil.handleWebviewDir(this)
 
             runOnDefaultDispatcher {
+                runCatching { TProxyManager.reconcile(this@SagerNet) }.onFailure {
+                    Logs.w(getString(R.string.tproxy_cleanup_failed))
+                }
                 PackageCache.register()
                 cleanWebview()
             }
@@ -116,16 +122,28 @@ class SagerNet : Application(),
                     underlyingNetwork = it
                     nativeInterface.syncNetworkState(it)
                 }
-
-                runCatching {
-                    SubscriptionUpdater.reconfigureUpdater()
-                }.onFailure {
-                    Logs.w("Unable to reconfigure subscription updater: ${it.message}")
+            }
+            runOnIoDispatcher {
+                try {
+                    SubscriptionUpdater.cleanupOrphanedWork()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Logs.w("Unable to clean up subscription updater: ${error.message}")
                 }
-
-                updateNotificationChannels()
+                try {
+                    SubscriptionUpdater.reconfigureUpdater()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Logs.w("Unable to reconfigure subscription updater: ${error.message}")
+                }
             }
         }
+
+        // The tile and boot receiver can start :bg without opening an activity.
+        // Channels must exist before any foreground service posts a notification.
+        if (isMainProcess || isBgProcess) updateNotificationChannels()
 
         if (BuildConfig.DEBUG) {
             System.setProperty(DEBUG_PROPERTY_NAME, DEBUG_PROPERTY_VALUE_ON)

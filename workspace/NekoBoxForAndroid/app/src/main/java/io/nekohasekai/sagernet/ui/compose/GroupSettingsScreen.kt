@@ -24,8 +24,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
@@ -36,6 +36,9 @@ import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SubscriptionFilterMode
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.group.SubscriptionDeviceProfiles
+import io.nekohasekai.sagernet.group.decodeSubscriptionDeviceHeaders
+import org.json.JSONObject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +54,8 @@ internal fun GroupSettingsScreen(
     onImportRouting: () -> Unit,
     onHwidChanged: (Boolean) -> Unit,
     onSpoofAppChanged: (Int) -> Unit,
+    onSpoofDeviceChanged: (Boolean) -> Unit,
+    onDevicePresetChanged: (String?) -> Unit,
     validateServerDns: (String) -> Boolean,
     validateAutoUpdateDelay: (String) -> Boolean,
 ) {
@@ -326,8 +331,21 @@ internal fun GroupSettingsScreen(
                     DataStore.subscriptionUpdateWhenConnectedOnly, stringResource(R.string.update_when_connected_only_sum), dynamicSummary = false) {
                     changed { DataStore.subscriptionUpdateWhenConnectedOnly = it }
                 } }
+                item { ProfileSwitchRow(R.drawable.ic_baseline_flip_camera_android_24, R.string.auto_update,
+                    DataStore.subscriptionAutoUpdate) { changed { DataStore.subscriptionAutoUpdate = it } } }
+                item {
+                    val title = stringResource(R.string.auto_update_delay)
+                    ProfileActionRow(R.drawable.ic_baseline_timelapse_24, R.string.auto_update_delay,
+                        DataStore.subscriptionAutoUpdateDelay.toString(), enabled = DataStore.subscriptionAutoUpdate) {
+                        edit(title, DataStore.subscriptionAutoUpdateDelay.toString(), KeyboardType.Number,
+                            accept = validateAutoUpdateDelay,
+                            update = { DataStore.subscriptionAutoUpdateDelay = it.toInt() })
+                    }
+                }
+
+                item { ProfileCategory(R.string.subscription_device_id) }
                 item { ProfileSwitchRow(R.drawable.ic_baseline_fingerprint_24, R.string.hwid_support,
-                    DataStore.subscriptionHwidEnabled, stringResource(R.string.hwid_support_sum), dynamicSummary = false) {
+                    DataStore.subscriptionHwidEnabled, stringResource(R.string.subscription_hwid_send_summary), dynamicSummary = false) {
                     changed { DataStore.subscriptionHwidEnabled = it; onHwidChanged(it) }
                 } }
                 item {
@@ -349,15 +367,57 @@ internal fun GroupSettingsScreen(
                             update = { DataStore.subscriptionUserAgent = it })
                     }
                 }
-                item { ProfileSwitchRow(R.drawable.ic_baseline_flip_camera_android_24, R.string.auto_update,
-                    DataStore.subscriptionAutoUpdate) { changed { DataStore.subscriptionAutoUpdate = it } } }
                 item {
-                    val title = stringResource(R.string.auto_update_delay)
-                    ProfileActionRow(R.drawable.ic_baseline_timelapse_24, R.string.auto_update_delay,
-                        DataStore.subscriptionAutoUpdateDelay.toString(), enabled = DataStore.subscriptionAutoUpdate) {
-                        edit(title, DataStore.subscriptionAutoUpdateDelay.toString(), KeyboardType.Number,
-                            accept = validateAutoUpdateDelay,
-                            update = { DataStore.subscriptionAutoUpdateDelay = it.toInt() })
+                    val title = stringResource(R.string.subscription_hwid_value)
+                    ProfileActionRow(R.drawable.ic_baseline_fingerprint_24, R.string.subscription_hwid_value,
+                        DataStore.subscriptionHwid.ifBlank { notSet }) {
+                        edit(title, DataStore.subscriptionHwid,
+                            update = { DataStore.subscriptionHwid = it })
+                    }
+                }
+                item { ProfileSwitchRow(R.drawable.ic_baseline_android_24, R.string.subscription_spoof_device,
+                    DataStore.subscriptionSpoofDevice, stringResource(R.string.subscription_spoof_device_summary),
+                    dynamicSummary = false) { changed { onSpoofDeviceChanged(it) } } }
+                if (DataStore.subscriptionSpoofDevice) item {
+                    val title = stringResource(R.string.subscription_device_profile)
+                    val profiles = SubscriptionDeviceProfiles.forApp(DataStore.subscriptionSpoofApp)
+                    val selected = profiles.firstOrNull { it.id == DataStore.subscriptionDevicePreset }
+                    val random = stringResource(R.string.subscription_device_random)
+                    ProfileActionRow(R.drawable.ic_baseline_android_24, R.string.subscription_device_profile,
+                        selected?.label ?: notSet) {
+                        context.showComposeSingleChoiceDialog(
+                            title = title,
+                            items = listOf(random) + profiles.map { it.label },
+                            selectedIndex = profiles.indexOf(selected) + 1,
+                            negativeButton = cancel,
+                            onItemSelected = { index -> changed {
+                                onDevicePresetChanged(profiles.getOrNull(index - 1)?.id)
+                            } },
+                        )
+                    }
+                }
+                val headerTitles = mapOf(
+                    "X-Device-Model" to R.string.subscription_header_model,
+                    "X-Device-Os" to R.string.subscription_header_os,
+                    "X-Ver-Os" to R.string.subscription_header_os_version,
+                    "X-Device-Locale" to R.string.subscription_header_locale,
+                    "X-App-Version" to R.string.subscription_header_app_version,
+                    "X-Client" to R.string.subscription_header_client,
+                    "Accept" to R.string.subscription_header_accept,
+                    "Accept-Language" to R.string.subscription_header_accept_language,
+                )
+                val headers = decodeSubscriptionDeviceHeaders(DataStore.subscriptionDeviceHeaders).orEmpty()
+                for ((name, value) in headers) {
+                    val titleRes = headerTitles[name] ?: continue
+                    item(key = "device-header:$name") {
+                        val title = stringResource(titleRes)
+                        ProfileActionRow(R.drawable.ic_baseline_grid_3x3_24, titleRes,
+                            value.ifBlank { notSet }) {
+                            edit(title, value, update = { updated ->
+                                DataStore.subscriptionDeviceHeaders =
+                                    JSONObject(headers + (name to updated)).toString()
+                            })
+                        }
                     }
                 }
             }

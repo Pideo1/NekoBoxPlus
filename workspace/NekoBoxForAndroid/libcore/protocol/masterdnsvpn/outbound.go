@@ -56,7 +56,10 @@ func (o *Outbound) Close() error {
 	return nil
 }
 
-func (o *Outbound) Start(stage adapter.StartStage) error {
+func (o *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(o.Close)
+	}
 	if stage != adapter.StartStateStart {
 		return nil
 	}

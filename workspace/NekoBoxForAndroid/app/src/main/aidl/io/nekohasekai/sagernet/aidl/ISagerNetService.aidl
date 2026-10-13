@@ -6,6 +6,13 @@ import io.nekohasekai.sagernet.aidl.SpeedTestData;
 interface ISagerNetService {
   int getState();
   String getProfileName();
+  // JSON array of connected mixed/HTTP listeners; contains no credentials or full configuration.
+  String activeProxyListeners();
+  boolean isNetworkSharingConfigurable();
+  boolean isTProxyTetheringActive();
+  // Change LAN access or TPROXY tethering and request a full restart of the active generated profile.
+  // Returns acceptance of the restart request; callers must verify the new active listener.
+  boolean setNetworkSharingEnabled(boolean enabled);
 
   void registerCallback(in ISagerNetServiceCallback cb, int id);
   oneway void unregisterCallback(in ISagerNetServiceCallback cb);

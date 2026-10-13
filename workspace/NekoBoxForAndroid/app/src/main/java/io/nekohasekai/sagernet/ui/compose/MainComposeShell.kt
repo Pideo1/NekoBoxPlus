@@ -153,6 +153,11 @@ internal fun MainComposeDrawer(
                             DrawerDestination(R.id.nav_traffic, R.string.menu_dashboard, R.drawable.ic_baseline_transform_24),
                             state.selectedItemId,
                         ) { onNavigate(it); state.closeDrawer() }
+                    } else {
+                        DrawerItem(
+                            DrawerDestination(R.id.nav_dashboard, R.string.integrated_dashboard, R.drawable.ic_dashboard_24),
+                            state.selectedItemId,
+                        ) { onNavigate(it); state.closeDrawer() }
                     }
                     DrawerItems(utilityDestinations, state.selectedItemId) { onNavigate(it); state.closeDrawer() }
                 }

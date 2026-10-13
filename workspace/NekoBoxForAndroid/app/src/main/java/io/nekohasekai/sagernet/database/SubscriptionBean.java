@@ -29,6 +29,11 @@ public class SubscriptionBean extends Serializable {
     public String filterRegex;
     public Boolean hwidEnabled;
     public Integer spoofApp;
+    // Null identity/header values indicate subscriptions created before v9.
+    public String hwid;
+    public Boolean spoofDevice;
+    public String devicePresetId;
+    public String deviceHeaders;
     public String serverDnsResolver;
     public Integer bannerLayout;
     public Boolean routingEnabled;
@@ -67,7 +72,7 @@ public class SubscriptionBean extends Serializable {
 
     @Override
     public void serializeToBuffer(ByteBufferOutput output) {
-        output.writeInt(8);
+        output.writeInt(9);
 
         output.writeInt(type);
 
@@ -117,6 +122,12 @@ public class SubscriptionBean extends Serializable {
 
         // v8
         output.writeBoolean(providerAutoUpdateDefaultsApplied);
+
+        // v9
+        output.writeString(hwid);
+        output.writeBoolean(Boolean.TRUE.equals(spoofDevice));
+        output.writeString(devicePresetId);
+        output.writeString(deviceHeaders);
     }
 
     public void serializeForShare(ByteBufferOutput output) {
@@ -197,6 +208,12 @@ public class SubscriptionBean extends Serializable {
             // Existing subscriptions must never have provider defaults applied again.
             providerAutoUpdateDefaultsApplied = true;
         }
+        if (version >= 9) {
+            hwid = input.readString();
+            spoofDevice = input.readBoolean();
+            devicePresetId = input.readString();
+            deviceHeaders = input.readString();
+        }
     }
 
     public void deserializeFromShare(ByteBufferInput input) {
@@ -234,6 +251,8 @@ public class SubscriptionBean extends Serializable {
         if (filterRegex == null) filterRegex = "";
         if (hwidEnabled == null) hwidEnabled = false;
         if (spoofApp == null) spoofApp = 0;
+        if (spoofDevice == null) spoofDevice = false;
+        if (devicePresetId == null) devicePresetId = "";
         if (serverDnsResolver == null) serverDnsResolver = "";
         if (bannerLayout == null) bannerLayout = 63;
         if (announcement == null) announcement = "";

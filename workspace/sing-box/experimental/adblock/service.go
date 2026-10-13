@@ -183,7 +183,10 @@ func New(ctx context.Context, logger log.ContextLogger, options option.AdblockOp
 	return service, nil
 }
 
-func (s *Service) Start(stage adapter.StartStage) error {
+func (s *Service) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(s.Close)
+	}
 	s.debug("start stage: ", stage)
 	switch stage {
 	case adapter.StartStateInitialize:

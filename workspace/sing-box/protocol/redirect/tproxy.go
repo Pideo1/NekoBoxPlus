@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"os"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -70,7 +71,7 @@ func NewTProxy(ctx context.Context, router adapter.Router, logger log.ContextLog
 	return tproxy, nil
 }
 
-func (t *TProxy) Start(stage adapter.StartStage) error {
+func (t *TProxy) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
@@ -78,20 +79,17 @@ func (t *TProxy) Start(stage adapter.StartStage) error {
 	if err != nil {
 		return err
 	}
+	scope.Add(t.udpNat.Close)
 	err = t.listener.Start()
 	if err != nil {
-		_ = t.udpNat.Close()
+		return err
 	}
-	return err
+	scope.Add(t.listener.Close)
+	return nil
 }
 
 func (t *TProxy) InterfaceUpdated(ctx context.Context) {
 	t.udpNat.Purge()
-}
-
-func (t *TProxy) Close() error {
-	_ = t.udpNat.Close()
-	return t.listener.Close()
 }
 
 func (t *TProxy) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
@@ -110,7 +108,7 @@ func (t *TProxy) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, s
 	metadata.InboundType = t.Type()
 	metadata.Source = source
 	metadata.Destination = destination
-	metadata.OriginDestination = t.listener.UDPAddr()
+	metadata.OriginDestination = destination
 	t.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
 }
 
@@ -130,6 +128,7 @@ func (t *TProxy) preparePacketConnection(source M.Socksaddr, destination M.Socks
 		listener:    t.listener,
 		source:      source.AddrPort(),
 		destination: destination,
+		factory:     service.FromContext[adapter.TProxySocketFactory](t.ctx),
 	}
 	return true, ctx, writer, func(it error) {
 		common.Close(common.PtrOrNil(writer.conn))
@@ -142,6 +141,7 @@ type tproxyPacketWriter struct {
 	source      netip.AddrPort
 	destination M.Socksaddr
 	conn        *net.UDPConn
+	factory     adapter.TProxySocketFactory
 }
 
 func (w *tproxyPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
@@ -157,7 +157,19 @@ func (w *tproxyPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 	var listenConfig net.ListenConfig
 	listenConfig.Control = control.Append(listenConfig.Control, control.ReuseAddr())
 	listenConfig.Control = control.Append(listenConfig.Control, redir.TProxyWriteBack())
-	packetConn, err := w.listener.ListenPacket(listenConfig, w.ctx, "udp", destination.String())
+	var packetConn net.PacketConn
+	var err error
+	if w.factory != nil {
+		var fd int
+		fd, err = w.factory.OpenTProxySocket(M.NetworkFromNetAddr("udp", destination.Addr), destination.String(), true)
+		if err == nil {
+			file := os.NewFile(uintptr(fd), "tproxy-reply")
+			packetConn, err = net.FilePacketConn(file)
+			_ = file.Close()
+		}
+	} else {
+		packetConn, err = w.listener.ListenPacket(listenConfig, w.ctx, "udp", destination.String())
+	}
 	if err != nil {
 		return err
 	}

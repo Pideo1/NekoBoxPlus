@@ -47,7 +47,14 @@ type Outbound struct {
 	quicProxyMode bool
 	quicDestCache *expiringmap.Map[quicDestCacheKey, uint64]
 	quicDestSeq   atomic.Uint64
+	reuse         bool
 }
+
+var (
+	_ adapter.InterfaceUpdateListener = (*Outbound)(nil)
+	_ adapter.IdleConnectionKeeper    = (*Outbound)(nil)
+	_ adapter.OutboundWithMultiplex   = (*Outbound)(nil)
+)
 
 type snellClient interface {
 	snellprotocol.Method
@@ -135,6 +142,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		psk:           []byte(options.PSK),
 		userKey:       []byte(options.UserKey),
 		version:       version,
+		reuse:         options.Reuse,
 		quicProxyMode: version == 5 || version == 6 && options.V6Options.QUICProxyMode,
 	}
 	if outbound.quicProxyMode {
@@ -278,6 +286,33 @@ const quicDestCacheTTL = 5 * time.Minute
 type quicDestCacheKey struct {
 	source      M.Socksaddr
 	destination M.Socksaddr
+}
+
+func (h *Outbound) MultiplexEnabled() bool {
+	return h.legacy == nil && h.reuse
+}
+
+// The pinned Snell fork predates upstream idle-pool controls. Keep its reuse
+// behavior unless the selected client exposes those controls; resetting here
+// would also interrupt active streams.
+func (h *Outbound) SetKeepIdleConnections(keep bool) {
+	if keeper, ok := h.client.(adapter.IdleConnectionKeeper); ok {
+		keeper.SetKeepIdleConnections(keep)
+	}
+}
+
+func (h *Outbound) CloseIdleConnections() {
+	if keeper, ok := h.client.(adapter.IdleConnectionKeeper); ok {
+		keeper.CloseIdleConnections()
+	}
+}
+
+func (h *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage != adapter.StartStateInitialize {
+		return nil
+	}
+	scope.Add(h.Close)
+	return nil
 }
 
 func (h *Outbound) isRecentQUICDest(source M.Socksaddr, destination M.Socksaddr) bool {
@@ -676,3 +711,5 @@ func (c *packetConnWrapper) Write(p []byte) (int, error) {
 }
 
 func (c *packetConnWrapper) RemoteAddr() net.Addr { return c.destination }
+
+var _ adapter.Lifecycle = (*Outbound)(nil)

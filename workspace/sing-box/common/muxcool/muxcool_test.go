@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
@@ -464,5 +465,62 @@ func TestFrameValidation(t *testing.T) {
 	meta := FrameMetadata{SessionID: 1, SessionStatus: SessionStatusNew, Target: M.Socksaddr{Fqdn: longDomain, Port: 443}}
 	if err := meta.writeMetaTo(io.Discard, TargetNetworkTCP, false); err == nil {
 		t.Fatal("writeMetaTo accepted a domain longer than 255 bytes")
+	}
+}
+
+func TestIdlePolicyPreservesActiveStreams(t *testing.T) {
+	client, _, cleanup := newTestClient(t)
+	defer cleanup()
+	conn, err := client.DialContext(t.Context(), N.NetworkTCP, M.Socksaddr{Fqdn: "example.com", Port: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.SetKeepIdleConnections(false)
+	client.CloseIdleConnections()
+	payload := []byte("active stream")
+	if _, err := conn.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	response := make([]byte, len(payload))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(payload, response) {
+		t.Fatalf("unexpected response: %q", response)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	client.access.Lock()
+	remaining := len(client.workers)
+	client.access.Unlock()
+	if remaining != 0 {
+		t.Fatalf("idle workers retained: %d", remaining)
+	}
+}
+
+func TestWarmupRetainsIdleWorker(t *testing.T) {
+	client, _, cleanup := newTestClient(t)
+	defer cleanup()
+	client.SetKeepIdleConnections(false)
+	conn, err := client.DialContext(adapter.ContextWithKeepSession(t.Context()), N.NetworkTCP, M.Socksaddr{Fqdn: "example.com", Port: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	client.access.Lock()
+	remaining := len(client.workers)
+	client.access.Unlock()
+	if remaining != 1 {
+		t.Fatalf("warmup workers retained: %d", remaining)
+	}
+	client.CloseIdleConnections()
+	client.access.Lock()
+	remaining = len(client.workers)
+	client.access.Unlock()
+	if remaining != 0 {
+		t.Fatalf("explicit idle cleanup retained %d workers", remaining)
 	}
 }

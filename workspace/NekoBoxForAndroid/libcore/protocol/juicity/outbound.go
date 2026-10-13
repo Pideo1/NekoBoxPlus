@@ -176,3 +176,10 @@ func certChainHash(rawCerts [][]byte) []byte {
 	}
 	return chainHash
 }
+
+func (o *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(o.Close)
+	}
+	return nil
+}

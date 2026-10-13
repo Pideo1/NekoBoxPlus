@@ -2,6 +2,7 @@ package byedpi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -66,7 +67,10 @@ func (o *Outbound) Close() error {
 	return releaseBridge(o.handle)
 }
 
-func (o *Outbound) Start(stage adapter.StartStage) error {
+func (o *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	if stage == adapter.StartStateInitialize {
+		scope.Add(o.Close)
+	}
 	if stage != adapter.StartStateStart {
 		return nil
 	}
@@ -177,9 +181,16 @@ func privateHandshake(
 		_ = conn.SetDeadline(deadline)
 	}
 	_, err := socks.ClientHandshake5(conn, command, destination, "", "")
-	if !stopCancellation() {
-		if contextErr := ctx.Err(); contextErr != nil {
-			err = contextErr
+	stopCancellation()
+	if contextErr := ctx.Err(); contextErr != nil {
+		err = contextErr
+	} else if err != nil {
+		// The socket timer may expire before the context timer is scheduled.
+		// Both use the same deadline, so report the context's deadline error.
+		var timeoutError net.Error
+		if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) &&
+			errors.As(err, &timeoutError) && timeoutError.Timeout() {
+			err = context.DeadlineExceeded
 		}
 	}
 	if err == nil {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/logger"
 )
@@ -17,7 +18,7 @@ func TestMASQUEConfigUsesDedicatedBucket(t *testing.T) {
 		Enabled: true,
 		Path:    path,
 	})
-	if err := cacheFile.Start(adapter.StartStateInitialize); err != nil {
+	if err := cacheFile.Start(adapter.StartStateInitialize, adapter.NewScope(t.Context(), log.NewNOPFactory().Logger())); err != nil {
 		t.Fatal(err)
 	}
 	defer cacheFile.Close()

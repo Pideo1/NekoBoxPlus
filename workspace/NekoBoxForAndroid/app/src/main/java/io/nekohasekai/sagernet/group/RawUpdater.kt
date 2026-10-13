@@ -45,6 +45,10 @@ internal fun mergeCurrentSubscriptionSettings(
     updated.filterRegex = current.filterRegex
     updated.hwidEnabled = current.hwidEnabled
     updated.spoofApp = current.spoofApp
+    updated.hwid = current.hwid
+    updated.spoofDevice = current.spoofDevice
+    updated.devicePresetId = current.devicePresetId
+    updated.deviceHeaders = current.deviceHeaders
     updated.serverDnsResolver = current.serverDnsResolver
     updated.bannerLayout = current.bannerLayout
     updated.routingEnabled = current.routingEnabled

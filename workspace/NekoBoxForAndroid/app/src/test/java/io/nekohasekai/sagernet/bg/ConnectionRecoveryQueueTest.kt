@@ -10,6 +10,62 @@ import java.util.concurrent.atomic.AtomicLong
 
 class ConnectionRecoveryQueueTest {
     @Test
+    fun disabledCoreSleepKeepsCoreAwakeOnIdleStartupAndPreservesWakeRecovery() {
+        val pauses = LinkedBlockingQueue<Boolean>()
+        val resets = LinkedBlockingQueue<ServiceRestartCause>()
+        val recovery = ConnectionRecoveryQueue(
+            urlTestRunning = { false },
+            pause = { pauses.add(it) },
+            recover = { _, _, cause -> resets.add(cause) },
+            log = {},
+            disableCoreSleep = true,
+        )
+        try {
+            recovery.idle(true, reconnect = false, reset = true)
+            recovery.network(true)
+            recovery.ready()
+            assertEquals(false, pauses.poll(2, TimeUnit.SECONDS))
+            recovery.urlTestFinished()
+            assertNull(resets.poll(100, TimeUnit.MILLISECONDS))
+
+            recovery.idle(false, reconnect = false, reset = true)
+            assertEquals(false, pauses.poll(2, TimeUnit.SECONDS))
+            recovery.urlTestFinished()
+            assertEquals(ServiceRestartCause.WakeReconnect, resets.poll(2, TimeUnit.SECONDS))
+        } finally {
+            recovery.close()
+        }
+    }
+
+    @Test
+    fun disabledCoreSleepKeepsCoreAwakeAcrossIdleCyclesWithoutEnablingRecovery() {
+        val pauses = LinkedBlockingQueue<Boolean>()
+        val resets = LinkedBlockingQueue<Boolean>()
+        val recovery = ConnectionRecoveryQueue(
+            urlTestRunning = { false },
+            pause = { pauses.add(it) },
+            recover = { _, reset, _ -> resets.add(reset) },
+            log = {},
+            disableCoreSleep = true,
+        )
+        try {
+            recovery.network(true)
+            recovery.ready()
+            assertEquals(false, pauses.poll(2, TimeUnit.SECONDS))
+            repeat(2) {
+                recovery.idle(true, reconnect = false, reset = false)
+                assertEquals(false, pauses.poll(2, TimeUnit.SECONDS))
+                recovery.idle(false, reconnect = false, reset = false)
+                assertEquals(false, pauses.poll(2, TimeUnit.SECONDS))
+            }
+            recovery.urlTestFinished()
+            assertNull(resets.poll(100, TimeUnit.MILLISECONDS))
+        } finally {
+            recovery.close()
+        }
+    }
+
+    @Test
     fun wakeRecoveryWaitsForNetworkAndUrlTest() {
         val testing = AtomicBoolean(true)
         val pauses = LinkedBlockingQueue<Boolean>()

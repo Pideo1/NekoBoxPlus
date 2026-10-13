@@ -20,8 +20,9 @@ type session struct {
 	transport TargetNetwork
 	dest      M.Socksaddr
 
-	closed bool
-	mu     sync.Mutex
+	keepSession bool
+	closed      bool
+	mu          sync.Mutex
 
 	// Downstream delivery. The worker's read loop pushes whole payloads here;
 	// the per-session conn reads them back out in order.
@@ -85,6 +86,9 @@ func (s *session) closeUpstream() {
 	if w != nil {
 		_ = w.writeEndFrame(id)
 		w.sessionManager.remove(id)
+		if !s.keepSession && w.closeIfIdle != nil {
+			w.closeIfIdle()
+		}
 	}
 }
 

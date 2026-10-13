@@ -172,10 +172,14 @@ func (c *CacheFile) SetDisableExpire(disableExpire bool) {
 	c.disableExpire = disableExpire
 }
 
-func (c *CacheFile) Start(stage adapter.StartStage) error {
+func (c *CacheFile) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	switch stage {
 	case adapter.StartStateInitialize:
-		return c.start()
+		err := c.start()
+		if err != nil {
+			return err
+		}
+		scope.Add(c.Close)
 	case adapter.StartStateStart:
 		c.startCacheCleanup()
 	}
@@ -288,16 +292,6 @@ func (c *CacheFile) start() error {
 		return err
 	}
 	return nil
-}
-
-func (c *CacheFile) Close() error {
-	c.dbAccess.RLock()
-	db := c.DB
-	c.dbAccess.RUnlock()
-	if db == nil {
-		return nil
-	}
-	return db.Close()
 }
 
 func checkDatabase(db *bbolt.DB) error {
@@ -522,4 +516,13 @@ func (c *CacheFile) SaveRuleSet(tag string, set *adapter.SavedBinary) error {
 		}
 		return bucket.Put([]byte(tag), setBinary)
 	})
+}
+
+// Close also supports standalone read-only handles used by NekoBoxForAndroid.
+func (c *CacheFile) Close() error {
+	db := c.database()
+	if db == nil {
+		return nil
+	}
+	return db.Close()
 }
