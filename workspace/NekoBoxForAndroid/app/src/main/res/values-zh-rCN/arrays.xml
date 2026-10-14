@@ -20,7 +20,7 @@
     </string-array>
 
     <string-array name="masterdnsvpn_compression_entry">
-        <item>离开</item>
+        <item>关闭</item>
         <item>ZSTD</item>
         <item>LZ4</item>
         <item>ZLIB</item>
@@ -36,7 +36,7 @@
     </string-array>
 
     <string-array name="route_network_type_entry">
-        <item>无线上网</item>
+        <item>无线网络</item>
         <item>@string/cellular</item>
         <item>以太网</item>
         <item>@string/routing_region_other</item>
@@ -70,7 +70,7 @@
         <item>HTTP/2</item>
         <item>QUIC</item>
         <item>gRPC</item>
-        <item>HTTP升级</item>
+        <item>HTTPUpgrade</item>
         <item>XHTTP</item>
     </string-array>
 
@@ -85,7 +85,7 @@
     </string-array>
 
     <string-array name="xhttp_mode_entry">
-        <item>汽车</item>
+        <item>自动</item>
         <item>Packet up</item>
         <item>Stream up</item>
         <item>Stream one</item>
@@ -148,7 +148,7 @@
     <string-array name="vmess_encryption_entry">
         <item>ChaCha20-Poly1305</item>
         <item>AES-128-GCM</item>
-        <item>汽车</item>
+        <item>自动</item>
         <item>@string/none</item>
         <item>零</item>
     </string-array>
@@ -180,8 +180,8 @@
 
     <string-array name="tun_implementation">
         <item>gVisor</item>
-        <item>系统</item>
-        <item>混合</item>
+        <item>System</item>
+        <item>Mixed</item>
     </string-array>
 
     <string-array name="hysteria_protocol">
@@ -192,12 +192,12 @@
 
     <string-array name="packet_encoding_entry">
         <item>@string/none</item>
-        <item>包</item>
+        <item>Packetaddr</item> 
         <item>XUDP</item>
     </string-array>
 
     <string-array name="dns_network_entry">
-        <item>汽车</item>
+        <item>自动</item>
         <item>首选 IPv6</item>
         <item>首选 IPv4</item>
         <item>仅 IPv4</item>
@@ -346,9 +346,9 @@
 
     <string-array name="trusttunnel_cronet_stack_entry">
         <item>否</item>
-        <item>对于 HTTPS</item>
-        <item>对于 QUIC</item>
-        <item>对于 HTTPS 和 QUIC</item>
+        <item>针对 HTTPS</item>
+        <item>针对 QUIC</item>
+        <item>针对 HTTPS 和 QUIC</item>
     </string-array>
 
     <string-array name="tuic_udp_relay_mode_entry">
@@ -367,24 +367,24 @@
         <item>Panic</item>
         <item>Fatal</item>
         <item>Error</item>
-        <item>警告</item>
-        <item>信息</item>
-        <item>调试</item>
-        <item>痕迹</item>
+        <item>Warning</item>
+        <item>Info</item>
+        <item>Debug</item>
+        <item>Trace</item>
     </string-array>
 
     <string-array name="tun_unrecognized_traffic_mode">
-        <item>堵塞</item>
-        <item>正常：直接，旁路：阻止</item>
-        <item>无代理（直接）</item>
+        <item>拦截</item>
+        <item>正常：直连，旁路：拦截</item>
+        <item>直连</item>
         <item>始终代理</item>
         <item>不保护 TUN</item>
     </string-array>
 
     <string-array name="tun_system_dns_traffic_mode">
-        <item>正常：代理，绕过：直接</item>
-        <item>代理人</item>
-        <item>直接（DNS 泄漏！）</item>
+        <item>正常：代理，绕过：直连</item>
+        <item>代理</item>
+        <item>直连（可能会出现DNS 泄漏！）</item>
     </string-array>
 
     <string-array name="snell_obfs_modes_entry">
@@ -394,7 +394,7 @@
     </string-array>
 
     <string-array name="snell_network_entry">
-        <item>汽车</item>
+        <item>自动</item>
         <item>TCP</item>
         <item>UDP</item>
     </string-array>

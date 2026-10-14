@@ -361,7 +361,7 @@
     <string name="profile_import_message">确认要导入配置 %s？</string>
     <string name="no_proxies_found_in_subscription">未在此订阅内找到服务器配置</string>
     <string name="action_export">导出</string>
-    <string name="clear_profiles_message">您确定要清空该分组吗\?</string>
+    <string name="clear_profiles_message">确定要清空该分组吗\?</string>
     <string name="remote_dns">远程 DNS</string>
     <string name="direct_dns">直连 DNS</string>
     <string name="server_dns">自定义服务器 DNS</string>
@@ -712,7 +712,7 @@
     <string name="force_quic">强制 QUIC</string>
     <string name="use_cronet_for_quic">使用 cronet 进行 QUIC</string>
     <string name="trusttunnel_protocol">协议</string>
-    <string name="trusttunnel_protocol_prefer_quic">更喜欢 QUIC</string>
+    <string name="trusttunnel_protocol_prefer_quic">首选 QUIC</string>
     <string name="trusttunnel_use_chrome_network_stack_no">否</string>
     <string name="trusttunnel_use_chrome_network_stack_for_quic">对于 QUIC</string>
     <string name="masque_tunnel_settings">隧道设置</string>
@@ -736,7 +736,7 @@
     <string name="tcp_segmentation">TCP分段</string>
     <string name="enable_fragment_for_direct">还可以直接启用碎片</string>
     <string name="clash_mode_rule">规则</string>
-    <string name="mux_preference">多工</string>
+    <string name="mux_preference">多路复用</string>
     <string name="network_change_reconnect">网络变化时重新连接</string>
     <string name="wake_reconnect">当设备从睡眠状态唤醒时重新连接</string>
     <string name="route_suggestions_load_failed">无法加载路线建议：%1$s</string>
@@ -761,7 +761,7 @@
     <string name="ruleset_editor_hint">首先编写 rsip: 或 rssite:</string>
     <string name="geosite_editor_hint">尝试编写地理站点：</string>
     <string name="failed_to_obtain_ip">获取IP失败</string>
-    <string name="destination_ip">目的IP</string>
+    <string name="destination_ip">目标IP</string>
     <string name="source_port">源端口</string>
     <string name="cellular">蜂窝网络</string>
     <string name="wifi_ssid">无线网络SSID</string>
@@ -820,7 +820,7 @@
     <string name="memory_limit">内存限制 (MB)</string>
     <string name="perform_libcore_gc_sweep">执行 libcore GC 扫描</string>
     <string name="perform_libcore_fake_crash">崩溃 libcore</string>
-    <string name="libcore_crash_go_panic">恐慌吧</string>
+    <string name="libcore_crash_go_panic">Panic</string>
     <string name="libcore_crash_go_index_out_of_range">索引超出范围</string>
     <string name="libcore_crash_go_stack_overflow">Go堆栈溢出</string>
     <string name="libcore_crash_native_abort">CGo 中止</string>
@@ -844,7 +844,7 @@
     <string name="adblock_save_ca_certificate_message">保存 CA 证书并手动安装，以便 HTTPS 过滤检查加密站点。</string>
     <string name="adblock_save_ca_saved">CA 证书已保存</string>
     <string name="adblock_ca_generate_failed">生成CA证书失败</string>
-    <string name="adblock_https_cronet">使用克罗内特</string>
+    <string name="adblock_https_cronet">使用cronet</string>
     <string name="adblock_skip_ev_certs">跳过具有 EV 证书的站点</string>
     <string name="adblock_system_wide_filter">系统范围模式</string>
     <string name="adblock_included_apps">包含的应用程序</string>
@@ -928,7 +928,7 @@
     <string name="urltest_standard_rtt" translatable="false">RTT</string>
     <string name="urltest_standard_first_handshake">第一次握手</string>
     <string name="route_asset_crc32">CRC32：%s</string>
-    <string name="throne_rule_sets">王座规则集</string>
+    <string name="throne_rule_sets">Throne规则集</string>
     <string name="summary_tun_unrecognized_traffic">确定未识别的 TUN 流量的路由。保持阻止以防止出站 IP 泄漏。</string>
     <string name="summary_tun_dns_whitelist">指定将路由到的 DNS 服务器请求的列表，无论 TUN 的 Android 系统流量策略如何。不影响未知流量。仅使用受信任的服务器。</string>
     <string name="title_tun_dot_whitelist">系统 TUN DoT 白名单</string>
@@ -949,8 +949,7 @@
     <string name="action_amneziawg" translatable="false">AmneziaWG 2/3</string>
     <string name="action_juicity" translatable="false">Juicity</string>
     <string name="proxy_set">代理集</string>
-    <string name="proxy_set_type_group">集团</string>
-    <string name="proxy_set_mode_selector">选择器</string>
+    <string name="proxy_set_type_group">代理组</string>
     <string name="proxy_set_default_outbound">默认出站</string>
     <string name="urltest_interval">URL测试间隔</string>
     <string name="urltest_tolerance">URL测试容差</string>
@@ -971,7 +970,7 @@
     <string name="require_proxy_in_vpn">VPN模式下启用本地代理</string>
     <string name="proxy_ip_leak_warning">这可能会泄露您的代理出站 IP。使用风险自负。</string>
     <string name="hwid_support">硬件标识符支持</string>
-    <string name="spoof_app">恶搞应用程序</string>
+    <string name="spoof_app">伪装应用程序</string>
     <string name="spoof_app_none">无</string>
     <string name="hwid_max_devices_reached">您已达到此订阅中的设备数量上限</string>
     <string name="ooc_subscription_token" translatable="false">OOCv1 API Token</string>
@@ -1004,8 +1003,8 @@
     <string name="use_cronet_for_quic_sum">使用 Chrome 网络堆栈使 TrustTunnel 不易被检测到</string>
     <string name="trusttunnel_protocol_https">HTTPS</string>
     <string name="trusttunnel_use_chrome_network_stack">使用 Chrome 网络堆栈</string>
-    <string name="trusttunnel_use_chrome_network_stack_for_https">对于 HTTPS</string>
-    <string name="trusttunnel_use_chrome_network_stack_for_https_and_quic">对于 HTTPS 和 QUIC</string>
+    <string name="trusttunnel_use_chrome_network_stack_for_https">针对 HTTPS</string>
+    <string name="trusttunnel_use_chrome_network_stack_for_https_and_quic">针对 HTTPS 和 QUIC</string>
     <string name="masque_use_http2">使用 HTTP/2</string>
     <string name="masque_cloudflare_profile">Cloudflare 简介</string>
     <string name="masque_profile_auth_token">身份验证令牌</string>
@@ -1050,23 +1049,21 @@
     <string name="geoip_editor_hint">尝试编写 geoip：</string>
     <string name="dns_domain_overrides_editor_hint">example.com 127.0.0.1</string>
     <string name="domain">域名</string>
-    <string name="destination_port">目的港</string>
+    <string name="destination_port">目标端口</string>
     <string name="outbound">出境</string>
     <string name="network_type">网络类型</string>
     <string name="wifi_bssid">无线网络 BSSID</string>
-    <string name="wifi_geolocation_required_toast">NekoBox+ 无法读取 Wi-Fi 网络，无法启用地理定位</string>
+    <string name="wifi_geolocation_required_toast">NekoBox+ 无法读取 Wi-Fi 网络，请启用地理定位</string>
     <string name="wifi_background_location_permission_message">当 NekoBox+ 未打开时，Wi-Fi SSID 和 BSSID 规则需要后台位置访问才能工作。在 Android 设置中，选择“%s”。</string>
     <string name="wifi_background_location_permission_continue_without">无需后台访问即可继续</string>
     <string name="title_tun_system_dns_traffic">TUN 的系统 DNS 流量路由</string>
     <string name="share_subscription_url">分享订阅网址</string>
-    <string name="masterdnsvpn">大师DNSVPN</string>
     <string name="masterdnsvpn_encryption_key">加密密钥</string>
     <string name="masterdnsvpn_dns_resolvers">DNS解析器</string>
     <string name="masterdnsvpn_advanced">高级</string>
     <string name="masterdnsvpn_packet_duplication_count">数据包重复计数</string>
     <string name="masterdnsvpn_min_upload_mtu">最小上传 MTU</string>
     <string name="masterdnsvpn_max_upload_mtu">最大上传MTU</string>
-    <string name="masterdnsvpn_rx_tx_workers">RX/TX 工作人员</string>
     <string name="masterdnsvpn_max_packets_per_batch">每批次最大数据包数</string>
     <string name="masterdnsvpn_preset_default">默认</string>
     <string name="masterdnsvpn_preset_censored">审查</string>
@@ -1109,7 +1106,7 @@
     <string name="memory_limit_summary">单盒的软内存限制。 sing-box 仍可能超过它。</string>
     <string name="perform_libcore_gc_sweep_summary">在运行的 libcore 上隐式调用运行时垃圾收集器</string>
     <string name="perform_libcore_fake_crash_summary">触发不可恢复的 libcore 错误和崩溃</string>
-    <string name="libcore_crash_go_nil_pointer">出现零指针恐慌</string>
+    <string name="libcore_crash_go_nil_pointer">出现零指针错误</string>
     <string name="libcore_crash_go_concurrent_map_write">并发映射写入</string>
     <string name="libcore_crash_go_unsafe_memory_write">去不安全的内存写入</string>
     <string name="libcore_crash_native_sigsegv">CGo SIGSEGV</string>
