@@ -3,15 +3,18 @@ package shadowsocks
 import (
 	"context"
 	"net"
+	"slices"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/common/mux"
+	"github.com/sagernet/sing-box/common/tls"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/sip003"
+	"github.com/sagernet/sing-box/transport/v2ray"
 	"github.com/sagernet/sing-shadowsocks2"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
@@ -30,7 +33,11 @@ var (
 	_ adapter.OutboundWithMultiplex   = (*Outbound)(nil)
 	_ adapter.InterfaceUpdateListener = (*Outbound)(nil)
 	_ adapter.IdleConnectionKeeper    = (*Outbound)(nil)
+	_ adapter.Lifecycle               = (*Outbound)(nil)
 )
+
+// Native UDP cannot be carried over a stream transport.
+var errStreamUDP = E.New("native UDP is not available over tls or transport, enable udp_over_tcp or multiplex")
 
 type Outbound struct {
 	outbound.Adapter
@@ -39,11 +46,32 @@ type Outbound struct {
 	method          shadowsocks.Method
 	serverAddr      M.Socksaddr
 	plugin          sip003.Plugin
+	tlsConfig       tls.Config
+	tlsDialer       tls.Dialer
+	transport       adapter.V2RayClientTransport
+	streamOnly      bool
 	uotClient       *uot.Client
 	multiplexDialer *mux.Client
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowsocksOutboundOptions) (adapter.Outbound, error) {
+	uotOptions := common.PtrValueOrDefault(options.UDPOverTCP)
+	networks := options.Network.Build()
+	streamOnly := (options.Transport != nil && options.Transport.Type != "") || (options.TLS != nil && options.TLS.Enabled)
+	if streamOnly {
+		if options.Plugin != "" {
+			return nil, E.New("plugin cannot be combined with tls or transport")
+		}
+		if !uotOptions.Enabled && !common.PtrValueOrDefault(options.Multiplex).Enabled {
+			// Native Shadowsocks UDP goes through a separate UDP socket and
+			// cannot ride on a TLS or V2Ray transport stream. Accept TCP only,
+			// unless UDP over TCP or multiplex carries the packets.
+			if options.Network != "" && slices.Contains(networks, N.NetworkUDP) {
+				return nil, E.New("udp requires udp_over_tcp or multiplex when tls or transport is used")
+			}
+			networks = []string{N.NetworkTCP}
+		}
+	}
 	method, err := shadowsocks.CreateMethod(ctx, options.Method, shadowsocks.MethodOptions{
 		Password: options.Password,
 	})
@@ -55,11 +83,12 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		return nil, err
 	}
 	outbound := &Outbound{
-		Adapter:    outbound.NewAdapterWithDialerOptions(C.TypeShadowsocks, tag, options.Network.Build(), options.DialerOptions),
+		Adapter:    outbound.NewAdapterWithDialerOptions(C.TypeShadowsocks, tag, networks, options.DialerOptions),
 		logger:     logger,
 		dialer:     outboundDialer,
 		method:     method,
 		serverAddr: options.ServerOptions.Build(),
+		streamOnly: streamOnly,
 	}
 	if options.Plugin != "" {
 		outbound.plugin, err = sip003.CreatePlugin(ctx, options.Plugin, options.PluginOptions, router, outbound.dialer, outbound.serverAddr)
@@ -67,10 +96,30 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 			return nil, err
 		}
 	}
-	uotOptions := common.PtrValueOrDefault(options.UDPOverTCP)
+	if options.TLS != nil {
+		outbound.tlsConfig, err = tls.NewClientWithOptions(tls.ClientOptions{
+			Context:       ctx,
+			Logger:        logger,
+			ServerAddress: options.Server,
+			Options:       common.PtrValueOrDefault(options.TLS),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if outbound.tlsConfig != nil {
+			outbound.tlsDialer = tls.NewDialer(outboundDialer, outbound.tlsConfig)
+		}
+	}
+	if options.Transport != nil {
+		outbound.transport, err = v2ray.NewClientTransport(ctx, logger, outbound.dialer, outbound.serverAddr, common.PtrValueOrDefault(options.Transport), outbound.tlsConfig)
+		if err != nil {
+			return nil, E.Cause(err, "create client transport: ", options.Transport.Type)
+		}
+	}
 	if !uotOptions.Enabled {
 		outbound.multiplexDialer, err = mux.NewClientWithOptions((*shadowsocksDialer)(outbound), logger, common.PtrValueOrDefault(options.Multiplex))
 		if err != nil {
+			common.Close(outbound.transport)
 			return nil, err
 		}
 	}
@@ -131,22 +180,37 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 }
 
 func (h *Outbound) MultiplexEnabled() bool {
-	return h.multiplexDialer != nil
+	if h.multiplexDialer != nil {
+		return true
+	}
+	transport, ok := h.transport.(adapter.V2RayMultiplexClientTransport)
+	return ok && transport.MultiplexEnabled()
 }
 
 func (h *Outbound) InterfaceUpdated(ctx context.Context) {
+	if h.transport != nil {
+		if err := adapter.ResetV2RayClientTransport(h.transport); err != nil {
+			h.logger.Warn(err)
+		}
+	}
 	if h.multiplexDialer != nil {
 		h.multiplexDialer.Reset()
 	}
 }
 
 func (h *Outbound) SetKeepIdleConnections(keep bool) {
+	if keeper, ok := h.transport.(adapter.IdleConnectionKeeper); ok {
+		keeper.SetKeepIdleConnections(keep)
+	}
 	if h.multiplexDialer != nil {
 		h.multiplexDialer.SetKeepIdleConnections(keep)
 	}
 }
 
 func (h *Outbound) CloseIdleConnections() {
+	if keeper, ok := h.transport.(adapter.IdleConnectionKeeper); ok {
+		keeper.CloseIdleConnections()
+	}
 	if h.multiplexDialer != nil {
 		h.multiplexDialer.CloseIdleConnections()
 	}
@@ -155,6 +219,9 @@ func (h *Outbound) CloseIdleConnections() {
 func (h *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateInitialize {
 		return nil
+	}
+	if h.transport != nil {
+		scope.Add(h.transport.Close)
 	}
 	if h.multiplexDialer != nil {
 		scope.Add(h.multiplexDialer.Close)
@@ -174,9 +241,14 @@ func (h *shadowsocksDialer) DialContext(ctx context.Context, network string, des
 	case N.NetworkTCP:
 		var outConn net.Conn
 		var err error
-		if h.plugin != nil {
+		switch {
+		case h.plugin != nil:
 			outConn, err = h.plugin.DialContext(ctx)
-		} else {
+		case h.transport != nil:
+			outConn, err = h.transport.DialContext(ctx)
+		case h.tlsDialer != nil:
+			outConn, err = h.tlsDialer.DialTLSContext(ctx, h.serverAddr)
+		default:
 			outConn, err = h.dialer.DialContext(ctx, N.NetworkTCP, h.serverAddr)
 		}
 		if err != nil {
@@ -184,6 +256,9 @@ func (h *shadowsocksDialer) DialContext(ctx context.Context, network string, des
 		}
 		return h.method.DialEarlyConn(outConn, destination), nil
 	case N.NetworkUDP:
+		if h.streamOnly {
+			return nil, errStreamUDP
+		}
 		outConn, err := h.dialer.DialContext(ctx, N.NetworkUDP, h.serverAddr)
 		if err != nil {
 			return nil, err
@@ -198,6 +273,9 @@ func (h *shadowsocksDialer) ListenPacket(ctx context.Context, destination M.Sock
 	ctx, metadata := adapter.ExtendContext(ctx)
 	metadata.Outbound = h.Tag()
 	metadata.Destination = destination
+	if h.streamOnly {
+		return nil, errStreamUDP
+	}
 	outConn, err := h.dialer.DialContext(ctx, N.NetworkUDP, h.serverAddr)
 	if err != nil {
 		return nil, err

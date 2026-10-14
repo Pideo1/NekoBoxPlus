@@ -38,19 +38,21 @@ type journal struct {
 	Generation string            `json:"generation"`
 	Config     Config            `json:"config"`
 	Offload    map[string]string `json:"offload,omitempty"`
+	BPFLimits  map[uint32]uint64 `json:"bpf_limits,omitempty"`
 }
 
 type Firewall struct {
-	Generation  string
-	HealthPort  int
-	UID         int
-	JournalPath string
-	run         commandRunner
-	state       journal
+	Generation     string
+	HealthPort     int
+	UID            int
+	JournalPath    string
+	run            commandRunner
+	openOffloadMap func() (offloadLimitMap, error)
+	state          journal
 }
 
 func NewFirewall(uid int, path string) *Firewall {
-	return &Firewall{UID: uid, JournalPath: path, run: runCommand}
+	return &Firewall{UID: uid, JournalPath: path, run: runCommand, openOffloadMap: openOffloadLimitMap}
 }
 func (f *Firewall) prefix() string        { return "NB4A_" + strconv.Itoa(f.UID) }
 func (f *Firewall) table() string         { return strconv.Itoa(30000 + f.UID%10000) }
@@ -452,13 +454,12 @@ func (f *Firewall) downstreams() ([]string, error) {
 		return nil, err
 	}
 	var interfaces []string
-	for _, line := range strings.Split(output, "\n") {
-		// IpServer's dump uses "iface - TetheredState". Ignore available and upstream interfaces.
-		if !strings.Contains(line, "TetheredState") {
-			continue
-		}
+	for line := range strings.SplitSeq(output, "\n") {
+		// IpServer's current-state record uses "iface - TetheredState".
+		// The dump also includes timestamped historical log messages containing
+		// TetheredState. Those are not interface records.
 		fields := strings.Fields(line)
-		if len(fields) < 3 || fields[1] != "-" {
+		if len(fields) < 3 || fields[1] != "-" || fields[2] != "TetheredState" {
 			continue
 		}
 		iface := fields[0]
@@ -466,9 +467,6 @@ func (f *Firewall) downstreams() ([]string, error) {
 			return nil, errors.New("invalid tether interface")
 		}
 		interfaces = append(interfaces, iface)
-	}
-	if len(interfaces) == 0 {
-		return nil, errors.New("enable/restart tethering before connecting TPROXY")
 	}
 	return slices.Compact(slices.Sorted(slices.Values(interfaces))), nil
 }
@@ -479,7 +477,6 @@ func (f *Firewall) disableOffload() error {
 		get, set []string
 	}{
 		{"hardware", []string{"settings", "get", "global", "tether_offload_disabled"}, []string{"settings", "put", "global", "tether_offload_disabled", "1"}},
-		{"bpf", []string{"device_config", "get", "connectivity", "override_tether_enable_bpf_offload"}, []string{"device_config", "put", "connectivity", "override_tether_enable_bpf_offload", "false"}},
 	}
 	for _, setting := range settings {
 		previous, err := f.run(setting.get[0], setting.get[1:]...)
@@ -502,12 +499,19 @@ func (f *Firewall) verifyOffload() error {
 	if err != nil {
 		return err
 	}
-	// The hardware setting alone is not proof: BPF enablement is latched when
-	// the tethering service is constructed on some Android versions.
-	if !strings.Contains(dump, "Offload disabled") || !strings.Contains(dump, "mIsBpfEnabled: false") {
-		return errors.New("tethering offload is still active or unverifiable; restart hotspot/service before connecting")
+	if !strings.Contains(dump, "Offload disabled") {
+		return errors.New("hardware tethering offload is still active or unverifiable; restart hotspot before connecting")
 	}
-	return nil
+	// mIsBpfEnabled is a capability latched at service construction, not a
+	// live switch. Changing device_config and restarting the hotspot cannot
+	// turn it off. Suppress forwarding in the live offload map instead.
+	if strings.Contains(dump, "mIsBpfEnabled: false") {
+		return nil
+	}
+	if !strings.Contains(dump, "mIsBpfEnabled: true") {
+		return errors.New("unable to verify tethering BPF offload state")
+	}
+	return f.suppressBPFOffload()
 }
 
 func (f *Firewall) Cleanup() error {
@@ -618,6 +622,9 @@ func (f *Firewall) Cleanup() error {
 				errs = append(errs, fmt.Errorf("%s %s: stale TPROXY rules", bin, table))
 			}
 		}
+	}
+	if err := f.restoreBPFOffload(); err != nil {
+		errs = append(errs, err)
 	}
 	for key, previous := range f.state.Offload {
 		name, args, ours := "settings", []string{"get", "global", "tether_offload_disabled"}, "1"

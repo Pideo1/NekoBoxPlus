@@ -4028,6 +4028,10 @@ public class SingBoxOptions {
 
         public MultiplexOptions multiplex;
 
+        public OutboundTLSOptions tls;
+
+        public V2RayTransportOptions transport;
+
     }
 
     public static class Outbound_VMessOptions extends Outbound {

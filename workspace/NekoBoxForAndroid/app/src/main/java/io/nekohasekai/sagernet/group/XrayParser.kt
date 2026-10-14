@@ -8,6 +8,7 @@ import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.fmt.internal.ProxySetBean
 import io.nekohasekai.sagernet.fmt.internal.setEmbeddedProfiles
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
+import io.nekohasekai.sagernet.fmt.shadowsocks.applyStreamSettings
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
 import io.nekohasekai.sagernet.fmt.v2ray.StandardV2RayBean
@@ -262,6 +263,15 @@ internal object XrayParser {
             password = endpoint.optString("password").ifBlank { settings.optString("password") }
             require(method.isNotBlank()) { "missing Shadowsocks method" }
             require(password.isNotBlank()) { "missing Shadowsocks password" }
+            val stream = VMessBean().apply {
+                applyStreamSettings(this, outbound)
+                initializeDefaultValues()
+            }
+            val security = outbound.optJSONObject("streamSettings")?.optString("security").orEmpty()
+            require(security.isBlank() || security.lowercase(Locale.ROOT) in setOf("none", "tls")) {
+                "unsupported Shadowsocks security: $security"
+            }
+            applyStreamSettings(stream)
             if (endpoint.optBoolean("uot") || settings.optBoolean("uot")) sUoT = true
             applyMux(this, outbound.optJSONObject("mux"))
             applyCommonOptions(this, outbound)

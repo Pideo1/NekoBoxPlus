@@ -23,6 +23,50 @@ import java.util.Base64
 
 class XrayParserTest {
     @Test
+    fun importsShadowsocksStreamsAndTls() {
+        for (network in listOf("tcp", "ws", "grpc", "httpupgrade", "xhttp", "splithttp")) {
+            val bean = XrayParser.parse("""
+                {"outbounds":[{"protocol":"shadowsocks",
+                  "settings":{"servers":[{"address":"ss.example","port":443,"method":"aes-128-gcm","password":"pass"}]},
+                  "streamSettings":{"network":"$network","security":"tls",
+                    "tlsSettings":{"serverName":"tls.example","alpn":["h2"],"allowInsecure":true,"fingerprint":"chrome"},
+                    "wsSettings":{"path":"/ss","headers":{"Host":"front.example"},"maxEarlyData":2048},
+                    "grpcSettings":{"serviceName":"ss","authority":"front.example"},
+                    "httpupgradeSettings":{"host":"front.example","path":"/ss"},
+                    "xhttpSettings":{"host":"front.example","path":"/ss","mode":"packet-up","extra":{"noGRPCHeader":true}}}
+                }]}
+            """.trimIndent())!!.single() as ShadowsocksBean
+            assertEquals(if (network == "splithttp") "xhttp" else network, bean.type)
+            assertEquals("tls", bean.security)
+            assertEquals("tls.example", bean.sni)
+            assertEquals("chrome", bean.utlsFingerprint)
+            assertTrue(bean.allowInsecure)
+            when (bean.type) {
+                "ws" -> {
+                    assertEquals("/ss", bean.path)
+                    assertEquals(2048, JSONObject(bean.customOutboundJson).getJSONObject("transport").getInt("max_early_data"))
+                }
+                "grpc" -> {
+                    assertEquals("ss", bean.path)
+                    assertEquals("front.example", JSONObject(bean.customOutboundJson).getJSONObject("transport").getString("authority"))
+                }
+                "xhttp" -> assertTrue(JSONObject(bean.xhttpExtra).getBoolean("no_grpc_header"))
+            }
+        }
+    }
+
+    @Test
+    fun skipsUnsupportedShadowsocksStreams() {
+        for (stream in listOf("\"network\":\"kcp\"", "\"security\":\"reality\"", "\"security\":\"unknown\"")) {
+            assertTrue(XrayParser.parse("""
+                {"outbounds":[{"protocol":"shadowsocks",
+                  "settings":{"address":"ss.example","port":443,"method":"aes-128-gcm","password":"pass"},
+                  "streamSettings":{$stream}}]}
+            """.trimIndent())!!.isEmpty())
+        }
+    }
+
+    @Test
     fun normalizesLegacyVlessVisionUdp443Flow() {
         val proxies =
             XrayParser.parse(

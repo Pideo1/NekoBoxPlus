@@ -30,6 +30,20 @@ public class ShadowsocksBean extends AbstractBean {
     public Integer muxBrutalUpMbps;
     public Integer muxBrutalDownMbps;
 
+    // Stream settings (transport and TLS). They are written to storage only
+    // when in use, so profiles without them keep their exact serialized form.
+    public String type;
+    public String host;
+    public String path;
+    public String security;
+    public String sni;
+    public String alpn;
+    public String certificates;
+    public String utlsFingerprint;
+    public Boolean allowInsecure;
+    public String xhttpMode;
+    public String xhttpExtra;
+
     @Override
     public void initializeDefaultValues() {
         super.initializeDefaultValues();
@@ -50,11 +64,23 @@ public class ShadowsocksBean extends AbstractBean {
         if (muxBrutal == null) muxBrutal = false;
         if (muxBrutalUpMbps == null) muxBrutalUpMbps = 100;
         if (muxBrutalDownMbps == null) muxBrutalDownMbps = 100;
+
+        if (JavaUtil.isNullOrBlank(type)) type = "tcp";
+        if (host == null) host = "";
+        if (path == null) path = "";
+        if (JavaUtil.isNullOrBlank(security)) security = "none";
+        if (sni == null) sni = "";
+        if (alpn == null) alpn = "";
+        if (certificates == null) certificates = "";
+        if (utlsFingerprint == null) utlsFingerprint = "";
+        if (allowInsecure == null) allowInsecure = false;
+        if (JavaUtil.isNullOrBlank(xhttpMode)) xhttpMode = "auto";
+        if (xhttpExtra == null) xhttpExtra = "";
     }
 
     @Override
     public void serialize(ByteBufferOutput output) {
-        output.writeInt(5);
+        output.writeInt(hasStreamSettings() ? 6 : 5);
         super.serialize(output);
         output.writeString(method);
         output.writeString(password);
@@ -73,6 +99,20 @@ public class ShadowsocksBean extends AbstractBean {
         output.writeBoolean(muxBrutal);
         output.writeInt(muxBrutalUpMbps);
         output.writeInt(muxBrutalDownMbps);
+        // v6
+        if (hasStreamSettings()) {
+            output.writeString(type);
+            output.writeString(host);
+            output.writeString(path);
+            output.writeString(security);
+            output.writeString(sni);
+            output.writeString(alpn);
+            output.writeString(certificates);
+            output.writeString(utlsFingerprint);
+            output.writeBoolean(allowInsecure);
+            output.writeString(xhttpMode);
+            output.writeString(xhttpExtra);
+        }
     }
 
     @Override
@@ -102,6 +142,27 @@ public class ShadowsocksBean extends AbstractBean {
             muxBrutalUpMbps = input.readInt();
             muxBrutalDownMbps = input.readInt();
         }
+        // v6
+        if (version >= 6) {
+            type = input.readString();
+            host = input.readString();
+            path = input.readString();
+            security = input.readString();
+            sni = input.readString();
+            alpn = input.readString();
+            certificates = input.readString();
+            utlsFingerprint = input.readString();
+            allowInsecure = input.readBoolean();
+            xhttpMode = input.readString();
+            xhttpExtra = input.readString();
+        }
+    }
+
+    // True when a transport or TLS is configured.
+    public boolean hasStreamSettings() {
+        boolean hasTransport = type != null && !type.isEmpty() && !type.equals("tcp");
+        boolean hasTls = security != null && !security.isEmpty() && !security.equals("none");
+        return hasTransport || hasTls;
     }
 
     @NotNull

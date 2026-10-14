@@ -32,4 +32,6 @@ type ShadowsocksOutboundOptions struct {
 	Network       NetworkList               `json:"network,omitempty"`
 	UDPOverTCP    *UDPOverTCPOptions        `json:"udp_over_tcp,omitempty"`
 	Multiplex     *OutboundMultiplexOptions `json:"multiplex,omitempty"`
+	OutboundTLSOptionsContainer
+	Transport *V2RayTransportOptions `json:"transport,omitempty"`
 }

@@ -36,7 +36,6 @@ class TProxyService : Service(), BaseService.Interface {
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            Logs.w(error)
             throw StartException(error.message.takeIf { error is IllegalStateException }
                 ?: getString(R.string.tproxy_root_denied), error)
         }
@@ -53,7 +52,6 @@ class TProxyService : Service(), BaseService.Interface {
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            Logs.w(error)
             throw StartException(getString(R.string.tproxy_start_failed), error)
         }
         brokerMonitor = runOnDefaultDispatcher {
@@ -62,10 +60,12 @@ class TProxyService : Service(), BaseService.Interface {
                 val error = runCatching { check(TProxyManager.request("status").getBoolean("active")) }.exceptionOrNull()
                 if (error != null) {
                     if (error is CancellationException) throw error
-                    Logs.w(error)
+                    Logs.e(getString(R.string.tproxy_core_failed), error)
+                    // Hotspot changes invalidate capture rules even without Connection Guard.
+                    val restart = data.desiredProfileId != 0L
                     stopRunner(
-                        restart = DataStore.connectionGuard && data.desiredProfileId != 0L,
-                        msg = getString(R.string.tproxy_core_failed),
+                        restart = restart,
+                        msg = if (restart) null else getString(R.string.tproxy_core_failed),
                         restartOrigin = ServiceRestartOrigin.Automatic,
                     )
                     return@runOnDefaultDispatcher

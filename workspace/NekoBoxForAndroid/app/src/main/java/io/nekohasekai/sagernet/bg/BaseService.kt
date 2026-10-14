@@ -1372,6 +1372,10 @@ class BaseService {
             data.connectingJob = runOnDefaultDispatcher {
                 data.lifecycleMutex.withLock {
                     try {
+                        // Settings can change while the background process stays
+                        // alive without a core. Apply them before startup can fail.
+                        val logLevel = AppLogLevelController.initialize(DataStore.logLevel)
+                        Libcore.setLogLevel(logLevel.singBoxName, logLevel.outputEnabled)
                         withContext(Dispatchers.Main.immediate) {
                             data.notification = createNotification(profile)
                         }
@@ -1453,7 +1457,8 @@ class BaseService {
                             resetCoreNetwork()
                         }
                     } catch (_: CancellationException) { // if the job was cancelled, it is canceller's responsibility to call stopRunner
-                    } catch (_: UnknownHostException) {
+                    } catch (e: UnknownHostException) {
+                        Logs.e(getString(R.string.invalid_server), e)
                         stopAfterStartFailure(
                             restartOrigin,
                             restartCause,
@@ -1464,10 +1469,16 @@ class BaseService {
                         withContext(Dispatchers.Main.immediate) {
                             Toast.makeText(this@Interface, e.readableMessage, Toast.LENGTH_SHORT).show()
                         }
-                        Logs.w(e)
+                        Logs.e(e)
                         data.binder.missingPlugin(e.plugin)
                         stopAfterStartFailure(restartOrigin, restartCause, retryAttempt, null)
                     } catch (exc: Throwable) {
+                        if (exc.javaClass.name.endsWith("proxyerror")) {
+                            // error from golang
+                            Logs.e(exc.readableMessage)
+                        } else {
+                            Logs.e(exc)
+                        }
                         if (exc.readableMessage.contains("no working DNS resolvers found", ignoreCase = true)) {
                             withContext(Dispatchers.Main.immediate) {
                                 Toast.makeText(
@@ -1478,12 +1489,6 @@ class BaseService {
                             }
                             stopAfterStartFailure(restartOrigin, restartCause, retryAttempt, null)
                             return@withLock
-                        }
-                        if (exc.javaClass.name.endsWith("proxyerror")) {
-                            // error from golang
-                            Logs.w(exc.readableMessage)
-                        } else {
-                            Logs.w(exc)
                         }
                         stopAfterStartFailure(
                             restartOrigin,
