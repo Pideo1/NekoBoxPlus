@@ -24,6 +24,47 @@ import org.junit.Test
 
 class ClashParserTest {
     @Test
+    fun importsShadowsocksTransportExtensions() {
+        for (network in listOf("tcp", "ws", "grpc", "httpupgrade", "xhttp")) {
+            val bean = ClashParser.parse("""
+                proxies:
+                  - name: ss
+                    type: ss
+                    server: ss.example
+                    port: 443
+                    cipher: aes-128-gcm
+                    password: pass
+                    network: $network
+                    tls: true
+                    servername: tls.example
+                    alpn: [h2]
+                    client-fingerprint: chrome
+                    skip-cert-verify: true
+                    ws-opts: {path: /ss, headers: {Host: front.example}, max-early-data: 2048}
+                    grpc-opts: {grpc-service-name: ss}
+                    xhttp-opts: {host: front.example, path: /ss, mode: packet-up, no-grpc-header: true}
+            """.trimIndent())!!.single() as ShadowsocksBean
+            assertEquals(network, bean.type)
+            assertEquals("tls", bean.security)
+            assertEquals("tls.example", bean.sni)
+            assertEquals("h2", bean.alpn)
+            assertTrue(bean.allowInsecure)
+            if (network == "xhttp") assertTrue(JSONObject(bean.xhttpExtra).getBoolean("no_grpc_header"))
+            if (network == "grpc") assertEquals("ss", bean.path)
+        }
+    }
+
+    @Test
+    fun skipsUnsupportedShadowsocksStreamsAndPluginConflicts() {
+        for (options in listOf("network: kcp", "tls: true, plugin: obfs", "reality-opts: {public-key: key}")) {
+            assertTrue(ClashParser.parse("""
+                proxies:
+                  - {name: invalid, type: ss, server: ss.example, port: 443, cipher: aes-128-gcm, password: pass, $options}
+            """.trimIndent())!!.isEmpty())
+        }
+    }
+
+    @Test
     fun normalizesLegacyVlessVisionUdp443Flow() {
         val proxies =
             ClashParser.parse(

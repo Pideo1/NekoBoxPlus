@@ -293,6 +293,7 @@ private fun sortTitle(sort: ConnectionSort) = when (sort) {
 
 @Composable private fun ProxiesPage(model: DashboardViewModel) {
     var groupNames by rememberSaveable { mutableStateOf(false) }
+    val sortLabels = listOf(R.string.dashboard_original_order, R.string.dashboard_name_order, R.string.dashboard_delay_order)
     val state = model.state
     val all = DashboardGroup("", "", "", false, true, state.outbounds)
     val groups = (state.groups + all).filter { !groupNames || it.tag.contains(model.proxyQuery, true) || it.tag.isEmpty() }
@@ -304,10 +305,19 @@ private fun sortTitle(sort: ConnectionSort) = when (sort) {
             Spacer(Modifier.weight(1f))
             var orderMenu by remember { mutableStateOf(false) }
             Box {
-                TextButton(onClick = { orderMenu = true }) { Text(stringResource(R.string.dashboard_sort)) }
+                TextButton(onClick = { orderMenu = true }) {
+                    Icon(painterResource(R.drawable.ic_baseline_keyboard_arrow_down_24),
+                        contentDescription = stringResource(R.string.dashboard_ascending),
+                        modifier = Modifier.size(18.dp).rotate(180f))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.dashboard_sort_current,
+                        stringResource(sortLabels.getOrElse(model.proxyOrder) { R.string.dashboard_original_order })))
+                }
                 DropdownMenu(orderMenu, { orderMenu = false }) {
-                    listOf(R.string.dashboard_original_order, R.string.dashboard_name_order, R.string.dashboard_delay_order).forEachIndexed { index, label ->
-                        DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { model.proxyOrder = index; model.persistFilters(); orderMenu = false })
+                    sortLabels.forEachIndexed { index, label ->
+                        DropdownMenuItem(text = { Text(stringResource(label)) },
+                            leadingIcon = { RadioButton(selected = index == model.proxyOrder, onClick = null) },
+                            onClick = { model.proxyOrder = index; model.persistFilters(); orderMenu = false })
                     }
                 }
             }

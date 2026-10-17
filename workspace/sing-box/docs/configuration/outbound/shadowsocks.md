@@ -14,6 +14,8 @@
   "network": "udp",
   "udp_over_tcp": false | {},
   "multiplex": {},
+  "tls": {},
+  "transport": {},
 
   ... // Dial Fields
 }
@@ -96,6 +98,26 @@ Conflict with `multiplex`.
 #### multiplex
 
 See [Multiplex](/configuration/shared/multiplex#outbound) for details.
+
+#### tls
+
+TLS configuration, see [TLS](/configuration/shared/tls/#outbound).
+
+Runs the Shadowsocks stream inside TLS. Cannot be combined with `plugin`.
+
+#### transport
+
+V2Ray Transport configuration, see [V2Ray Transport](/configuration/shared/v2ray-transport/).
+
+Carries the Shadowsocks stream over WebSocket, gRPC, HTTPUpgrade, XHTTP and the
+other V2Ray transports. Cannot be combined with `plugin`.
+
+!!! note ""
+
+    Native Shadowsocks UDP is sent through a separate UDP socket and cannot be
+    carried by `tls` or `transport`. When either is set, the outbound only
+    accepts TCP unless `udp_over_tcp` or `multiplex` is enabled, and an explicit
+    `network` that lists `udp` is rejected.
 
 ### Dial Fields
 

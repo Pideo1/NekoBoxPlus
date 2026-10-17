@@ -2060,7 +2060,7 @@
     <string name="dashboard_no_connections">Соединений нет</string>
     <string name="dashboard_search_proxies">Поиск прокси</string>
     <string name="dashboard_group_names">Поиск по именам групп</string>
-    <string name="dashboard_original_order">Исходный порядок</string>
+    <string name="dashboard_original_order">Источник</string>
     <string name="dashboard_name_order">По имени</string>
     <string name="dashboard_delay_order">По задержке</string>
     <string name="dashboard_all_proxies">Все прокси</string>

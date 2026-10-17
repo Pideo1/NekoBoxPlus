@@ -8,6 +8,7 @@ import io.nekohasekai.sagernet.fmt.masque.MasqueBean
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
 import io.nekohasekai.sagernet.fmt.openvpn.OpenVPNBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
+import io.nekohasekai.sagernet.fmt.shadowsocks.applyStreamSettings
 import io.nekohasekai.sagernet.fmt.shadowsocksr.ShadowsocksRBean
 import io.nekohasekai.sagernet.fmt.snell.parseClashSnell
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
@@ -92,7 +93,7 @@ internal object ClashParser {
             when (type) {
                 "socks5" -> parseSocks(proxy)
                 "http" -> parseHttp(proxy, globalFingerprint)
-                "ss" -> parseShadowsocks(proxy)
+                "ss" -> parseShadowsocks(proxy, globalFingerprint)
                 "ssr" -> parseShadowsocksR(proxy)
                 "vmess", "vless", "trojan" -> parseV2Ray(type, proxy, globalFingerprint)
                 "snell" -> parseClashSnell(proxy)
@@ -136,7 +137,7 @@ internal object ClashParser {
             }
         }
 
-    private fun parseShadowsocks(proxy: Map<String, Any?>) =
+    private fun parseShadowsocks(proxy: Map<String, Any?>, globalFingerprint: String) =
         ShadowsocksBean().apply {
             serverAddress = proxy.requiredValue("server")
             serverPort = proxy.requiredPort()
@@ -165,6 +166,19 @@ internal object ClashParser {
                     }
                     else -> pluginName.takeIf(String::isNotBlank).orEmpty()
                 }
+            val network = proxy.value("network").lowercase(Locale.ROOT)
+            require(network.isBlank() || network in setOf("tcp", "ws", "grpc", "httpupgrade", "xhttp")) {
+                "unsupported Shadowsocks transport: $network"
+            }
+            require(proxy.map("reality-opts") == null) { "unsupported Shadowsocks security: reality" }
+            val stream = VMessBean().apply {
+                alterId = -1 // Reuse the complete XHTTP options parser.
+                applyV2RayTransport(this, proxy)
+                security = if (proxy.boolean("tls")) "tls" else "none"
+                applyTLS(this, proxy, globalFingerprint)
+                initializeDefaultValues()
+            }
+            applyStreamSettings(stream)
             if (proxy.boolean("udp-over-tcp") || proxy.boolean("uot")) sUoT = true
             applyMux(this, proxy.map("smux"))
         }
