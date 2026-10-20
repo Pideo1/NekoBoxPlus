@@ -1,10 +1,11 @@
-name: Ingest patches.tar.gz
+name: Ingest patches
 
 on:
   push:
     branches: [main]
     paths:
       - "patches.tar.gz"
+      - "patches.zip"
   workflow_dispatch:
 
 permissions:
@@ -19,21 +20,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract patches.tar.gz into ./patches
+      - name: Extract patches archive into ./patches
         id: extract
         run: |
           # The push trigger fires on removal too (this job's own cleanup
-          # commit deletes patches.tar.gz) -- no file here just means
+          # commit deletes the archive) -- no archive here just means
           # "nothing to ingest", not a failure.
-          if [ ! -f patches.tar.gz ]; then
-            echo "no patches.tar.gz in repo root -- nothing to do"
+          found=()
+          for f in patches.tar.gz patches.zip; do
+            [ -f "$f" ] && found+=("$f")
+          done
+
+          if [ ${#found[@]} -eq 0 ]; then
+            echo "no patches archive in repo root -- nothing to do"
             echo "extracted=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          if [ ${#found[@]} -gt 1 ]; then
+            echo "::error::several patch archives present (${found[*]}) -- keep exactly one"
+            exit 1
+          fi
+
+          archive="${found[0]}"
           rm -rf patches
           mkdir patches
-          tar -xzf patches.tar.gz -C patches
+          case "$archive" in
+            *.tar.gz) tar -xzf "$archive" -C patches ;;
+            *.zip)    unzip -q "$archive" -d patches ;;
+          esac
+
           echo "extracted=true" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
 
       - name: Build workspace/, then discard patches/ and the archive
         id: commit
@@ -42,9 +60,9 @@ jobs:
           bash scripts/prepare-workspace.sh
           # Neither is committed: workspace/ is the only thing that
           # persists -- patches/ was never added to git, and this removes
-          # patches.tar.gz too, so nothing but the prepared sources is
+          # the archive too, so nothing but the prepared sources is
           # left in the repo once this run is done.
-          rm -rf patches patches.tar.gz
+          rm -rf patches patches.tar.gz patches.zip
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -58,7 +76,7 @@ jobs:
             echo "nothing to commit"
             echo "prepared=false" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "Apply patches.tar.gz -> workspace/ [skip ci]"
+            git commit -m "Apply patches archive -> workspace/ [skip ci]"
             git push
             echo "prepared=true" >> "$GITHUB_OUTPUT"
           fi
