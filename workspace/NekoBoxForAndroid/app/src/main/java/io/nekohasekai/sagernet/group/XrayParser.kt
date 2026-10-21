@@ -38,7 +38,6 @@ internal object XrayParser {
     private const val superscriptDigits = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 
     private data class ParsedOutbound(
-        val source: JSONObject,
         val tag: String,
         val beans: List<AbstractBean>,
     )
@@ -90,7 +89,7 @@ internal object XrayParser {
                             }.getOrNull()
                             .orEmpty()
                     beans.forEach { it.name = realName }
-                    ParsedOutbound(outbound, outbound.optString("tag"), beans)
+                    ParsedOutbound(outbound.optString("tag"), beans)
                 }
 
                 val parsedBeans = parsedOutbounds.flatMap(ParsedOutbound::beans)
@@ -105,50 +104,41 @@ internal object XrayParser {
                     continue
                 }
 
-                val taggedOutbounds = parsedOutbounds.filter { it.tag.isNotBlank() }.sortedBy(ParsedOutbound::tag)
-                // JSONObject uses source identity, so duplicate tags do not consume unrelated outbounds.
-                val convertedSources = mutableSetOf<JSONObject>()
-                val converted = mutableListOf<ProxySetBean>()
-                val balancers = config.optJSONObject("routing")
+                val balancer = config.optJSONObject("routing")
                     ?.optJSONArray("balancers")
-                    ?.let { array -> (0 until array.length()).mapNotNull(array::optJSONObject) }
+                    ?.let { array -> (0 until array.length()).firstNotNullOfOrNull(array::optJSONObject) }
+                if (parsedBeans.isEmpty() || (parsedBeans.size == 1 && balancer == null)) {
+                    addAll(parsedBeans)
+                    continue
+                }
+
+                // Conversion is per configuration: selectors describe Xray routing, not
+                // which remote servers should survive in the imported profile. Include
+                // auxiliary and untagged outbounds once, in their original numbered order.
+                val strategy = balancer?.optJSONObject("strategy")
+                    ?.optString("type")
                     .orEmpty()
-
-                for ((index, balancer) in balancers.withIndex()) {
-                    val selectors = balancer.optJSONArray("selector")?.strings().orEmpty()
-                    val selected = taggedOutbounds.filter { outbound -> selectors.any(outbound.tag::startsWith) }
-                    val strategyObject = balancer.optJSONObject("strategy")
-                    val strategy = strategyObject
-                        ?.optString("type")
-                        .orEmpty()
-                        .lowercase(Locale.ROOT)
-                        .replace("-", "")
-                        .replace("_", "")
-                        .ifBlank { "random" }
-                    val fallbackTag = balancer.optString("fallbackTag")
-                    val fallback = taggedOutbounds.filter { fallbackTag.isNotBlank() && it.tag == fallbackTag }
-                    val members = (selected + fallback).distinctBy { it.source }.filter { it.beans.isNotEmpty() }
-                    if (members.isEmpty()) continue
-
-                    val memberBeans = members.flatMap(ParsedOutbound::beans)
-                    convertedSources += members.map(ParsedOutbound::source)
-                    converted += ProxySetBean().apply {
-                        name = remarks ?: balancer.optString("tag").ifBlank { "Xray balancer ${index + 1}" }
-                        mode = ProxySetBean.MODE_URL_TEST
-                        type = ProxySetBean.TYPE_LIST
-                        setEmbeddedProfiles(memberBeans)
-                        testURL = balancerOptions.fallbackTestURL.takeIf(::isHttpURL) ?: CONNECTION_TEST_URL
-                        applyProbeSettings(config, members.map(ParsedOutbound::tag), strategy)
-                        initializeDefaultValues()
-                    }
-                }
-
-                addAll(converted)
-                parsedOutbounds.forEach { outbound ->
-                    if (outbound.source !in convertedSources) {
-                        addAll(outbound.beans)
-                    }
-                }
+                    .lowercase(Locale.ROOT)
+                    .replace("-", "")
+                    .replace("_", "")
+                    .ifBlank { "random" }
+                val selectors = balancer?.optJSONArray("selector")?.strings().orEmpty()
+                val fallbackTag = balancer?.optString("fallbackTag").orEmpty()
+                val remoteTags = parsedOutbounds.filter { it.beans.isNotEmpty() }.map(ParsedOutbound::tag)
+                // Keep the first balancer's probe policy when adding routing-only servers.
+                val probeTags = remoteTags.filter { tag ->
+                    selectors.any(tag::startsWith) || (fallbackTag.isNotBlank() && tag == fallbackTag)
+                }.ifEmpty { remoteTags }
+                add(ProxySetBean().apply {
+                    name = remarks ?: balancer?.optString("tag")?.takeIf(String::isNotBlank)
+                        ?: if (balancer != null) "Xray balancer 1" else "Xray URLTest"
+                    mode = ProxySetBean.MODE_URL_TEST
+                    type = ProxySetBean.TYPE_LIST
+                    setEmbeddedProfiles(parsedBeans)
+                    testURL = balancerOptions.fallbackTestURL.takeIf(::isHttpURL) ?: CONNECTION_TEST_URL
+                    applyProbeSettings(config, probeTags, strategy)
+                    initializeDefaultValues()
+                })
             }
         }
     }

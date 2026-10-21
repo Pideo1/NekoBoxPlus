@@ -76,14 +76,14 @@ class XrayParserTest {
                   {"protocol":"vless","settings":{"address":"current.example","port":443,"id":"22222222-2222-2222-2222-222222222222","flow":"xtls-rprx-vision"}}
                 ]}
                 """.trimIndent(),
-            )!!
+            ) { XrayParser.BalancerOptions(convert = false) }!!
 
         assertEquals("xtls-rprx-vision", (proxies[0] as VMessBean).encryption)
         assertEquals("xtls-rprx-vision", (proxies[1] as VMessBean).encryption)
     }
 
     @Test
-    fun convertsBalancerMembersIntoEmbeddedUrlTest() {
+    fun convertsEntireConfigurationIncludingNonBalancerMembersIntoEmbeddedUrlTest() {
         val proxies = XrayParser.parse(
             """
             {
@@ -101,16 +101,15 @@ class XrayParserTest {
             """.trimIndent(),
         )!!
 
-        assertEquals(2, proxies.size)
+        assertEquals(1, proxies.size)
         val urlTest = proxies.first() as ProxySetBean
         assertEquals("Fleet", urlTest.name)
         assertEquals(ProxySetBean.MODE_URL_TEST, urlTest.mode)
         assertEquals("https://probe.example/generate_204", urlTest.testURL)
         assertEquals("30s", urlTest.testInterval)
         val members = urlTest.decodeEmbeddedProfiles()
-        assertEquals(listOf("³ Fleet", "¹ Fleet"), members.map { it.displayName() })
-        assertEquals(listOf("a.example", "b.example"), members.map { it.requireBean().serverAddress })
-        assertEquals("² Fleet", proxies.last().name)
+        assertEquals(listOf("¹ Fleet", "² Fleet", "³ Fleet"), members.map { it.displayName() })
+        assertEquals(listOf("b.example", "other.example", "a.example"), members.map { it.requireBean().serverAddress })
     }
 
     @Test
@@ -163,7 +162,7 @@ class XrayParserTest {
         assertEquals("https://www.google.com/generate_204", urlTest.testURL)
         assertEquals("10s", urlTest.testInterval)
         assertEquals(
-            listOf("a.example", "b.example", "fallback.example"),
+            listOf("fallback.example", "a.example", "b.example"),
             urlTest.decodeEmbeddedProfiles().map { it.requireBean().serverAddress },
         )
     }
@@ -184,10 +183,10 @@ class XrayParserTest {
             """.trimIndent(),
         )!!
 
-        assertEquals(3, parsed.size)
-        assertTrue(parsed.all { it is ProxySetBean })
-        assertEquals(listOf(listOf("a.example", "b.example"), listOf("b.example"), listOf("c.example")),
-            parsed.map { (it as ProxySetBean).decodeEmbeddedProfiles().map { member -> member.requireBean().serverAddress } })
+        val set = parsed.single() as ProxySetBean
+        assertEquals("safe", set.name)
+        assertEquals(listOf("a.example", "b.example", "c.example"),
+            set.decodeEmbeddedProfiles().map { it.requireBean().serverAddress })
     }
 
     @Test
@@ -254,24 +253,45 @@ class XrayParserTest {
         balancers.put(JSONObject("""{"tag":"duplicate","selector":["proxy-b"]}"""))
         balancers.put(JSONObject("""{"tag":"empty","selector":["missing"]}"""))
         val parsed = XrayParser.parse(config.toString())!!
-        assertEquals(4, parsed.size)
-        val first = parsed.first() as ProxySetBean
+        val first = parsed.single() as ProxySetBean
         assertEquals("Xray balancer 1", first.name)
-        assertEquals(listOf("a.example", "duplicate.example", "b.example"),
+        assertEquals(listOf("a.example", "b.example", "other.example", "duplicate.example"),
             first.decodeEmbeddedProfiles().map { it.requireBean().serverAddress })
-        assertEquals("other.example", parsed.last().serverAddress)
     }
 
     @Test
-    fun emptySelectorsDoNotInventMembersButUsableFallbackCanBecomeSingleMemberSet() {
+    fun missingSelectorsOrFallbackDoNotSplitTheConfiguration() {
         val config = JSONObject(balancerConfig())
         val balancer = config.getJSONObject("routing").getJSONArray("balancers").getJSONObject(0)
         balancer.remove("selector")
-        assertTrue(XrayParser.parse(config.toString())!!.none { it is ProxySetBean })
-        balancer.put("fallbackTag", "proxy-b")
-        val parsed = XrayParser.parse(config.toString())!!
-        assertEquals(3, parsed.size)
-        assertEquals("b.example", (parsed.first() as ProxySetBean).decodeEmbeddedProfiles().single().requireBean().serverAddress)
+        for (fallback in listOf("", "proxy-b", "missing")) {
+            balancer.put("fallbackTag", fallback)
+            val set = XrayParser.parse(config.toString())!!.single() as ProxySetBean
+            assertEquals(listOf("a.example", "b.example", "other.example"),
+                set.decodeEmbeddedProfiles().map { it.requireBean().serverAddress })
+        }
+    }
+
+    @Test
+    fun conversionKeepsConfigurationsSeparateWithOrWithoutBalancers() {
+        val withBalancer = JSONObject(balancerConfig()).put("remarks", "With balancer")
+        val withoutBalancer = JSONObject(balancerConfig()).put("remarks", "Without balancer")
+        withoutBalancer.remove("routing")
+        // Untagged remote outbounds also belong to the configuration.
+        withoutBalancer.getJSONArray("outbounds").getJSONObject(2).remove("tag")
+        val text = JSONArray().put(withBalancer).put(withoutBalancer).toString()
+        val parsed = XrayParser.parse(text)!!
+        assertEquals(listOf("With balancer", "Without balancer"), parsed.map { it.name })
+        parsed.forEach { bean ->
+            val members = (bean as ProxySetBean).decodeEmbeddedProfiles()
+            assertEquals(listOf("a.example", "b.example", "other.example"),
+                members.map { it.requireBean().serverAddress })
+            assertEquals(listOf("¹ ${bean.name}", "² ${bean.name}", "³ ${bean.name}"),
+                members.map { it.displayName() })
+        }
+        val split = XrayParser.parse(text) { XrayParser.BalancerOptions(convert = false) }!!
+        assertEquals(6, split.size)
+        assertTrue(split.none { it is ProxySetBean })
     }
 
     @Test
@@ -487,7 +507,7 @@ class XrayParserTest {
                   ]
                 }
                 """.trimIndent(),
-            )!!
+            ) { XrayParser.BalancerOptions(convert = false) }!!
 
         assertEquals(9, proxies.size)
         assertTrue(proxies[0] is HttpBean)
@@ -574,7 +594,7 @@ class XrayParserTest {
                     .put("settings", JSONObject().put("address", "server-$index.example").put("port", 1080)),
             )
         }
-        val proxies = XrayParser.parse(JSONObject().put("remarks", "Fleet").put("outbounds", outbounds).toString())!!
+        val proxies = XrayParser.parse(JSONObject().put("remarks", "Fleet").put("outbounds", outbounds).toString()) { XrayParser.BalancerOptions(convert = false) }!!
 
         assertEquals(10, proxies.size)
         assertEquals("¹ Fleet", proxies.first().name)
