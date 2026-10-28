@@ -23,6 +23,8 @@ import (
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/json"
+	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/filemanager"
 	"github.com/sagernet/ws"
@@ -370,7 +372,7 @@ func (s *Server) listenerAddress() (network string, address string) {
 	address = s.httpServer.Addr
 	unixAddress, isUnix := strings.CutPrefix(address, "unix://")
 	if !isUnix {
-		return "tcp", address
+		return M.NetworkFromNetAddr(N.NetworkTCP, M.ParseSocksaddr(address).Addr), address
 	}
 	_ = os.Remove(unixAddress)
 	return "unix", unixAddress

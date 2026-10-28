@@ -63,7 +63,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		MinConnectTimeout: 5 * time.Second,
 	}))
 	dialOptions = append(dialOptions, grpc.WithContextDialer(func(ctx context.Context, server string) (net.Conn, error) {
-		return dialer.DialContext(ctx, N.NetworkTCP, M.ParseSocksaddr(server))
+		return dialer.DialContext(adapter.ContextForMultiplexSession(ctx), N.NetworkTCP, M.ParseSocksaddr(server))
 	}))
 	//nolint:staticcheck
 	dialOptions = append(dialOptions, grpc.WithReturnConnectionError())

@@ -32,8 +32,7 @@ func NewService(configContent string, platformInterface PlatformInterface) (*Box
 	runtimeDebug.FreeOSMemory()
 	ctx, cancel := context.WithCancel(ctx)
 	platformWrapper := &platformInterfaceWrapper{
-		iif:       platformInterface,
-		useProcFS: platformInterface.UseProcFS(),
+		iif: platformInterface,
 	}
 	service.MustRegister[adapter.PlatformInterface](ctx, platformWrapper)
 	instance, err := box.New(box.Options{

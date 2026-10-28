@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	N "github.com/sagernet/sing/common/network"
 )
 
 func waitURLTestOutboundReady(ctx context.Context, outboundManager adapter.OutboundManager, detour adapter.Outbound) error {
@@ -29,13 +30,9 @@ func waitURLTestOutboundTreeReady(
 		visited[tag] = true
 	}
 	if group, isGroup := detour.(adapter.OutboundGroup); isGroup {
-		selectedTag := group.Now()
-		if selectedTag == "" {
+		selected := group.Selected(N.NetworkTCP)
+		if selected == nil {
 			return nil
-		}
-		selected, loaded := outboundManager.Outbound(selectedTag)
-		if !loaded {
-			return fmt.Errorf("selected URLTest outbound %q is not found", selectedTag)
 		}
 		return waitURLTestOutboundTreeReady(ctx, outboundManager, selected, visited)
 	}

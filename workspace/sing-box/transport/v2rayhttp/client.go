@@ -64,7 +64,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 			ReadIdleTimeout: time.Duration(options.IdleTimeout),
 			PingTimeout:     time.Duration(options.PingTimeout),
 			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.STDConfig) (net.Conn, error) {
-				conn, err := tlsDialer.DialTLSContext(ctx, M.ParseSocksaddr(addr))
+				conn, err := tlsDialer.DialTLSContext(adapter.ContextForMultiplexSession(ctx), M.ParseSocksaddr(addr))
 				if err != nil {
 					return nil, err
 				}
@@ -126,7 +126,11 @@ func (c *Client) dialHTTP(ctx context.Context) (net.Conn, error) {
 	}
 	switch hostLen := len(c.host); hostLen {
 	case 0:
-		request.Host = c.serverAddr.AddrString()
+		if c.serverAddr.IsIPv6() {
+			request.Host = "[" + c.serverAddr.AddrString() + "]"
+		} else {
+			request.Host = c.serverAddr.AddrString()
+		}
 	case 1:
 		request.Host = c.host[0]
 	default:

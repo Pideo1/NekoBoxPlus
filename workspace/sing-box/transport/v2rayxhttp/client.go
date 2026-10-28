@@ -1157,7 +1157,7 @@ func createHTTPClient(ctx context.Context, dest M.Socksaddr, dialer N.Dialer, op
 	congestionControlFactory, _ := commonCongestion.New(options.CongestionController, options.CWND, ntp.TimeFuncFromContext(ctx))
 	rawConns := newRawConnTracker()
 	dialContext := func(ctxInner context.Context) (net.Conn, error) {
-		conn, err := dialer.DialContext(ctxInner, N.NetworkTCP, dest)
+		conn, err := dialer.DialContext(adapter.ContextForMultiplexSession(ctxInner), N.NetworkTCP, dest)
 		if err != nil {
 			return nil, err
 		}
@@ -1198,7 +1198,7 @@ func createHTTPClient(ctx context.Context, dest M.Socksaddr, dialer N.Dialer, op
 		transport = &http3.Transport{
 			QUICConfig: quicConfig,
 			Dial: func(ctx context.Context, addr string, tlsCfg *gotls.Config, cfg *quic.Config) (*quic.Conn, error) {
-				udpConn, dErr := dialer.DialContext(ctx, N.NetworkUDP, dest)
+				udpConn, dErr := dialer.DialContext(adapter.ContextForMultiplexSession(ctx), N.NetworkUDP, dest)
 				if dErr != nil {
 					return nil, dErr
 				}

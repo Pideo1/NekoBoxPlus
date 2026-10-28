@@ -3,6 +3,7 @@ package libcore
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -31,11 +32,14 @@ func (o *fakeReadyOutbound) WaitReady(ctx context.Context) error { return o.wait
 
 type fakeReadyGroup struct {
 	*fakeReadyOutbound
-	selected string
+	selected adapter.Outbound
 }
 
-func (g *fakeReadyGroup) Now() string   { return g.selected }
-func (g *fakeReadyGroup) All() []string { return []string{g.selected} }
+var _ adapter.OutboundGroup = (*fakeReadyGroup)(nil)
+
+func (g *fakeReadyGroup) Selected(string) adapter.Outbound  { return g.selected }
+func (g *fakeReadyGroup) AttachConnection(io.Closer) func() { return func() {} }
+func (g *fakeReadyGroup) All() []string                     { return []string{g.selected.Tag()} }
 
 type fakeReadyOutboundManager struct {
 	adapter.OutboundManager
@@ -81,7 +85,7 @@ func TestWaitURLTestOutboundReadyTraversesGroupAndDependencies(t *testing.T) {
 			t.Fatal("group readiness should not replace selected outbound readiness")
 			return nil
 		}},
-		selected: "selected",
+		selected: selected,
 	}
 	manager := &fakeReadyOutboundManager{outbounds: map[string]adapter.Outbound{
 		"dependency": dependency,

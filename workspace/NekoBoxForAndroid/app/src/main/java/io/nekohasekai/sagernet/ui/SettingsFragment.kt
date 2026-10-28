@@ -4,7 +4,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -159,6 +158,7 @@ class SettingsFragment : ToolbarFragment(),
 
     fun syncServiceState() { revision++ }
 
+    // Let MainActivity close the drawer before dispatching Back to Settings.
     override fun onBackPressed(): Boolean = when (page) {
         Page.Top -> false
         else -> { showTopLevel(); true }
@@ -186,7 +186,6 @@ class SettingsFragment : ToolbarFragment(),
                 }
             }
         }
-        BackHandler(enabled = current != Page.Top, onBack = ::showTopLevel)
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             contentWindowInsets = WindowInsets(0, 0, 0, 0),

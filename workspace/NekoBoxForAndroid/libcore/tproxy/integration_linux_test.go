@@ -59,6 +59,7 @@ func TestKernelTProxyRoundTripAndCleanup(t *testing.T) {
 	}
 	defer listener.Close()
 	s := &Server{UID: os.Getuid(), Token: strings.Repeat("a", 64), firewall: NewFirewall(10123, filepath.Join(dir, "journal")), listener: listener}
+	defer s.closeProbes()
 	if err = s.startEcho(); err != nil {
 		t.Fatal(err)
 	}
@@ -124,12 +125,71 @@ func TestKernelTProxyRoundTripAndCleanup(t *testing.T) {
 		}
 		t.Fatal("prepared core cannot handle transparent traffic:", err)
 	}
+	var probeAddresses [2]string
+	for i := range s.udpProbes {
+		probeAddresses[i] = s.udpProbes[i].conn.LocalAddr().String()
+	}
+	// Count sockets bound to the synthetic health endpoint, not TCP TIME_WAIT
+	// entries. A fresh client per probe used to accumulate UDP reply sockets.
+	replySockets := func() int {
+		t.Helper()
+		count := 0
+		for _, item := range []struct{ network, address string }{{"udp", "203.0.113.254"}, {"udp6", "fdfe:ffff::1"}} {
+			data, err := os.ReadFile("/proc/net/" + item.network)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for line := range strings.SplitSeq(string(data), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) < 2 {
+					continue
+				}
+				endpoint, err := procEndpoint(fields[1])
+				if err == nil && endpoint.Addr().String() == item.address && int(endpoint.Port()) == s.healthPort {
+					count++
+				}
+			}
+		}
+		return count
+	}
+	initialReplies := replySockets()
+	if initialReplies != 2 {
+		t.Fatalf("expected one reply socket per family, got %d", initialReplies)
+	}
+	checkRepeatedProbes := func() {
+		t.Helper()
+		for range 30 {
+			if err := s.probe(); err != nil {
+				t.Fatal(err)
+			}
+			for i := range s.udpProbes {
+				if got := s.udpProbes[i].conn.LocalAddr().String(); got != probeAddresses[i] {
+					t.Fatalf("probe source changed: %s -> %s", probeAddresses[i], got)
+				}
+			}
+		}
+		if count := replySockets(); count != initialReplies {
+			t.Fatalf("UDP reply sockets grew from %d to %d", initialReplies, count)
+		}
+	}
+	checkRepeatedProbes()
 	if err = s.firewall.Activate(); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.probe(); err != nil {
-		t.Fatal("active firewall blocked core:", err)
+	checkRepeatedProbes()
+	// Losing forwarding must still fail the health check, and recovery must
+	// reuse the same flow rather than adding another transparent reply socket.
+	dropUDP := []string{"-m", "mark", "--mark", "0x40000000/0x40000000", "-p", "udp", "-j", "DROP"}
+	if err = s.firewall.rule("iptables", "mangle", append([]string{"-I", s.firewall.prefix() + "_P", "1"}, dropUDP...)...); err != nil {
+		t.Fatal(err)
 	}
+	if err = s.probe(); err == nil || !strings.Contains(err.Error(), "local UDP echo:") {
+		t.Fatalf("broken UDP forwarding was not diagnosed: %v", err)
+	}
+	if err = s.firewall.rule("iptables", "mangle", append([]string{"-D", s.firewall.prefix() + "_P"}, dropUDP...)...); err != nil {
+		t.Fatal(err)
+	}
+	checkRepeatedProbes()
 	// A regular app starts on a physical route and receives its capture mark
 	// in OUTPUT. Test that rerouting works without pre-marking the socket.
 	child := exec.Command("bash", "-c", fmt.Sprintf(`exec 3<>/dev/tcp/203.0.113.254/%d; printf test >&3; IFS= read -r -n 4 -t 2 reply <&3; test "$reply" = test`, s.healthPort))
@@ -179,9 +239,16 @@ func TestKernelTProxyRoundTripAndCleanup(t *testing.T) {
 	if err != nil || uid != os.Getuid() {
 		t.Fatalf("UDP owner=%d error=%v", uid, err)
 	}
+	if err = core.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.probe(); err == nil {
+		t.Fatal("stopped core passed its health check")
+	}
 	if err = s.firewall.Cleanup(); err != nil {
 		t.Fatal(err)
 	}
+	s.closeProbes()
 	// Capture cleanup restores direct TCP and UDP connectivity.
 	for _, network := range []string{"tcp4", "udp4"} {
 		conn, e := net.Dial(network, net.JoinHostPort("127.0.0.2", strconv.Itoa(s.healthPort)))
