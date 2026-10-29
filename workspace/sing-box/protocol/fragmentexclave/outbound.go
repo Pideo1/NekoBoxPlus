@@ -63,8 +63,9 @@ func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger
 		splitPacket:   options.TCPSegmentation,
 	}
 	if defaultDialer, isDefaultDialer := common.Cast[*dialer.DefaultDialer](fragmentOutbound.dialer); isDefaultDialer {
+		icmpControl := defaultDialer.ICMPControl()
 		fragmentOutbound.icmpPort = ping.NewPort(ctx, logger, func(destination netip.Addr) control.Func {
-			return defaultDialer.DialerForICMPDestination(destination).Control
+			return icmpControl
 		}, 0)
 	}
 	return fragmentOutbound, nil

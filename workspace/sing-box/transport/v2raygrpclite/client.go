@@ -71,7 +71,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 	}
 	if tlsConfig == nil {
 		client.transport.DialTLSContext = func(ctx context.Context, network, addr string, cfg *tls.STDConfig) (net.Conn, error) {
-			conn, err := dialer.DialContext(ctx, network, M.ParseSocksaddr(addr))
+			conn, err := dialer.DialContext(adapter.ContextForMultiplexSession(ctx), network, M.ParseSocksaddr(addr))
 			if err != nil {
 				return nil, err
 			}
@@ -83,7 +83,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		}
 		tlsDialer := tls.NewDialer(dialer, tlsConfig)
 		client.transport.DialTLSContext = func(ctx context.Context, network, addr string, cfg *tls.STDConfig) (net.Conn, error) {
-			conn, err := tlsDialer.DialTLSContext(ctx, M.ParseSocksaddr(addr))
+			conn, err := tlsDialer.DialTLSContext(adapter.ContextForMultiplexSession(ctx), M.ParseSocksaddr(addr))
 			if err != nil {
 				return nil, err
 			}

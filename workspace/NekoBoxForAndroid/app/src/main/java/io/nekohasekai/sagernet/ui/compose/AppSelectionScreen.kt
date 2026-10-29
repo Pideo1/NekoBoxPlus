@@ -425,7 +425,7 @@ private fun AppRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Checkbox(checked = selected, onCheckedChange = null)
+            Checkbox(checked = selected, onCheckedChange = { onToggle(app) })
         }
     }
 }

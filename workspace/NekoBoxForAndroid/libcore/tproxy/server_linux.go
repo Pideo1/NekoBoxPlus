@@ -1,9 +1,7 @@
 package tproxy
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -28,6 +25,8 @@ type Server struct {
 	failed                   string
 	firewall                 *Firewall
 	healthPort               int
+	udpProbes                [2]udpProbe
+	echoStats                [2]echoStats
 	echoTCP                  net.Listener
 	echoUDP                  net.PacketConn
 	echoTCP6                 net.Listener
@@ -62,7 +61,12 @@ func (s *Server) Run() (err error) {
 	if err = s.firewall.Cleanup(); err != nil {
 		return err
 	}
-	defer func() { s.mu.Lock(); defer s.mu.Unlock(); err = errors.Join(err, s.firewall.Cleanup()) }()
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.closeProbes()
+		err = errors.Join(err, s.firewall.Cleanup())
+	}()
 	_ = os.Remove(s.Path)
 	listener, err := net.ListenUnix("unixpacket", &net.UnixAddr{Name: s.Path, Net: "unixpacket"})
 	if err != nil {
@@ -120,6 +124,7 @@ func (s *Server) Run() (err error) {
 					s.lastHealthy = time.Now()
 				} else if time.Since(s.lastHealthy) >= 5*time.Second {
 					s.failed = probeErr.Error()
+					s.closeProbes()
 					if e = s.firewall.Cleanup(); e != nil {
 						s.failed += "; cleanup: " + e.Error()
 					}
@@ -239,6 +244,7 @@ func (s *Server) dispatch(r Request, fd int, label string) (response Response, o
 		if r.Config == nil || s.active {
 			err = errors.New("invalid prepare state")
 		} else {
+			s.closeProbes()
 			err = s.firewall.Prepare(*r.Config)
 			s.prepared = err == nil
 			s.failed = ""
@@ -255,6 +261,7 @@ func (s *Server) dispatch(r Request, fd int, label string) (response Response, o
 			s.downstreams, err = s.firewall.downstreams()
 		}
 		if err != nil {
+			s.closeProbes()
 			err = errors.Join(err, s.firewall.Cleanup())
 			s.prepared = false
 		} else {
@@ -263,6 +270,7 @@ func (s *Server) dispatch(r Request, fd int, label string) (response Response, o
 			response.Active = true
 		}
 	case "cleanup", "shutdown":
+		s.closeProbes()
 		err = s.firewall.Cleanup()
 		s.active, s.prepared = false, false
 		response.Active = false
@@ -285,7 +293,7 @@ func (s *Server) startEcho() error {
 		return err
 	}
 	s.echoUDP = udp
-	startEchoLoops(tcp, udp)
+	startEchoLoops(tcp, udp, &s.echoStats[0])
 	tcp6, e := net.Listen("tcp6", net.JoinHostPort("::1", strconv.Itoa(s.healthPort)))
 	if e == nil {
 		udp6, e := net.ListenPacket("udp6", net.JoinHostPort("::1", strconv.Itoa(s.healthPort)))
@@ -293,13 +301,13 @@ func (s *Server) startEcho() error {
 			_ = tcp6.Close()
 		} else {
 			s.echoTCP6, s.echoUDP6 = tcp6, udp6
-			startEchoLoops(tcp6, udp6)
+			startEchoLoops(tcp6, udp6, &s.echoStats[1])
 		}
 	}
 	return nil
 }
 
-func startEchoLoops(tcp net.Listener, udp net.PacketConn) {
+func startEchoLoops(tcp net.Listener, udp net.PacketConn, stats *echoStats) {
 	go func() {
 		for {
 			conn, e := tcp.Accept()
@@ -318,85 +326,47 @@ func startEchoLoops(tcp net.Listener, udp net.PacketConn) {
 		for {
 			n, addr, e := udp.ReadFrom(data)
 			if e != nil {
+				stats.record(false, false, e)
 				return
 			}
-			_, _ = udp.WriteTo(data[:n], addr)
+			stats.record(true, false, nil)
+			written, e := udp.WriteTo(data[:n], addr)
+			if e == nil && written != n {
+				e = io.ErrShortWrite
+			}
+			stats.record(false, e == nil, e)
 		}
 	}()
 }
 
+// probe and closeProbes run under the lifecycle lock. Keep one UDP flow per
+// family: closing a client does not expire its core NAT entry or reply socket.
 func (s *Server) probe() error {
 	c := s.firewall.state.Config
-	// Probe the real device listener through marked loopback delivery. A special
-	// root-only route in the core sends this challenge to the local echo endpoint.
-	if c.IPv4 {
-		address := net.JoinHostPort("203.0.113.254", strconv.Itoa(s.healthPort))
-		for _, network := range []string{"tcp4", "udp4"} {
-			if err := challenge(network, address); err != nil {
-				return err
-			}
+	for family, enabled := range []bool{c.IPv4, c.IPv6} {
+		if !enabled {
+			continue
 		}
-	}
-	if c.IPv6 {
-		if s.echoTCP6 == nil {
-			return errors.New("IPv6 echo endpoint unavailable")
-		}
-		address := net.JoinHostPort("fdfe:ffff::1", strconv.Itoa(s.healthPort))
-		for _, network := range []string{"tcp6", "udp6"} {
-			if err := challenge(network, address); err != nil {
-				return err
+		host, suffix := "203.0.113.254", "4"
+		if family == 1 {
+			if s.echoTCP6 == nil {
+				return errors.New("IPv6 echo endpoint unavailable")
 			}
+			host, suffix = "fdfe:ffff::1", "6"
+		}
+		address := net.JoinHostPort(host, strconv.Itoa(s.healthPort))
+		if err := challenge("tcp"+suffix, address); err != nil {
+			return err
+		}
+		if err := s.udpProbes[family].check("udp"+suffix, address); err != nil {
+			return fmt.Errorf("%w (local UDP echo: %s)", err, s.echoStats[family].snapshot())
 		}
 	}
 	return nil
 }
 
-func challenge(network, address string) error {
-	dialer := net.Dialer{Timeout: 400 * time.Millisecond, Control: func(_, _ string, raw syscall.RawConn) error {
-		var sockErr error
-		err := raw.Control(func(fd uintptr) { sockErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, CaptureMark) })
-		return errors.Join(err, sockErr)
-	}}
-	// A policy route of type local otherwise selects the synthetic destination
-	// itself as the source, which is not an assigned address on this device.
-	ip := net.IPv4(127, 0, 0, 1)
-	if strings.HasSuffix(network, "6") {
-		ip = net.IPv6loopback
+func (s *Server) closeProbes() {
+	for i := range s.udpProbes {
+		s.udpProbes[i].close()
 	}
-	if strings.HasPrefix(network, "tcp") {
-		dialer.LocalAddr = &net.TCPAddr{IP: ip}
-	} else {
-		dialer.LocalAddr = &net.UDPAddr{IP: ip}
-	}
-	conn, err := dialer.Dial(network, address)
-	if err != nil {
-		return fmt.Errorf("%s core probe: %w", network, err)
-	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(400 * time.Millisecond))
-	nonce := make([]byte, 32)
-	if _, err = rand.Read(nonce); err != nil {
-		return err
-	}
-	challenge := []byte(hex.EncodeToString(nonce))
-	if _, err = conn.Write(challenge); err != nil {
-		return err
-	}
-	reply := make([]byte, len(challenge))
-	if strings.HasPrefix(network, "udp") {
-		var n int
-		n, err = conn.Read(reply)
-		if err == nil && n != len(reply) {
-			err = io.ErrUnexpectedEOF
-		}
-	} else {
-		_, err = io.ReadFull(conn, reply)
-	}
-	if err != nil {
-		return fmt.Errorf("%s core probe: %w", network, err)
-	}
-	if subtle.ConstantTimeCompare(challenge, reply) != 1 {
-		return errors.New("invalid core probe reply")
-	}
-	return nil
 }
